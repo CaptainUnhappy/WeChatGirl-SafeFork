@@ -154,6 +154,9 @@ function abortable(promise, signal) {
 }
 
 function fetchOnce(url, ip, signal) {
+  // Public account pages can put more than 512 KiB of scripts/styles before the article.
+  const byteLimit = url.hostname === 'mp.weixin.qq.com' && /^\/s(?:\/|$)/.test(url.pathname)
+    ? 4 * 1024 * 1024 : WEB_READER_LIMITS.bytes;
   return new Promise((resolve, reject) => {
     let request, response, decoder, settled = false;
     const destroy = () => { decoder?.destroy(); response?.destroy(); request?.destroy(); };
@@ -206,12 +209,12 @@ function fetchOnce(url, ip, signal) {
         let downloaded = 0;
         res.on('data', chunk => {
           downloaded += chunk.length;
-          if (decoder && downloaded > WEB_READER_LIMITS.bytes) finish(Error('网页压缩响应过大，已停止读取'));
+          if (decoder && downloaded > byteLimit) finish(Error('网页压缩响应过大，已停止读取'));
         });
         readable.on('data', chunk => {
           if (settled) return;
-          chunks.push(chunk.subarray(0, WEB_READER_LIMITS.bytes - size)); size += chunk.length;
-          if (size >= WEB_READER_LIMITS.bytes) { finish(null, result(true)); destroy(); }
+          chunks.push(chunk.subarray(0, byteLimit - size)); size += chunk.length;
+          if (size >= byteLimit) { finish(null, result(true)); destroy(); }
         });
         readable.on('end', () => finish(null, result(false)));
         if (decoder) {

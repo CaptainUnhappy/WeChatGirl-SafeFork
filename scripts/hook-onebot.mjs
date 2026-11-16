@@ -14,6 +14,8 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
+import {pluginEnabled} from '../packages/plugin-api/catalog.mjs';
+import {groupMuted} from '../packages/plugin-api/group-mute.mjs';
 
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = file => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
@@ -173,7 +175,35 @@ export class HookOneBot {
       (s.username.includes('@chatroom')?'group':'private')===kind).length!==1)fail('TARGET_MAPPING_AMBIGUOUS_OR_MISSING');
     return matches[0];
   }
-  async send(kind, target, text, deliveryId, proactive, mention, quoteServerId) {
+  async openVideo(kind,target,id,previousClicks=0){
+    if(!['group','private'].includes(kind)||!/^[1-9]\d{0,15}$/.test(target)||!/^[a-f0-9]{64}$/.test(id)||!Number.isInteger(previousClicks)||previousClicks<0||previousClicks>2)fail('VIDEO_TARGET_INVALID');
+    const key='wechat:'+kind+':'+target;
+    const expires=Date.now()+45000;
+    const prepare=async()=>{
+      this.reload();
+      if(Date.now()>=expires)fail('VIDEO_DOWNLOAD_QUEUE_EXPIRED');
+      if(this.stopped||!this.allowed(kind,target)||!pluginEnabled(this.directory,'video-workbench',key))fail('CONVERSATION_NOT_ALLOWED');
+      const session=await this.foregroundTarget(kind,target);
+      const video=await this.reader('/api/v1/videos/'+id+'/open-target?conversationKey='+encodeURIComponent(key)).catch(error=>{
+        if(error.message==='API_HTTP_409')fail('VIDEO_TARGET_NOT_UNIQUE');
+        if(error.message==='API_HTTP_410')fail('VIDEO_REFERENCE_EXPIRED');
+        throw error;
+      });
+      if(video.videoId!==id||video.conversationKey!==key||video.talker!==session.username)fail('VIDEO_TARGET_MISMATCH');
+      if(!Number.isSafeInteger(video.seconds)||video.seconds<0||video.seconds>99999||typeof video.onlyVideo!=='boolean')fail('VIDEO_TARGET_INVALID');
+      if(!Array.isArray(video.displaySeconds)||video.displaySeconds.length>3||video.displaySeconds.some(seconds=>!Number.isSafeInteger(seconds)||seconds<1||Math.abs(seconds-video.seconds)>1))fail('VIDEO_TARGET_INVALID');
+      for(const route of [video.before,video.after])if(!Array.isArray(route)||route.length>8||route.some(item=>typeof item!=='string'||!/^(?:v|t:[a-f0-9]{64})$/.test(item))||route.length&&!route.some(item=>item.startsWith('t:')))fail('VIDEO_TARGET_INVALID');
+      this.reload();
+      if(Date.now()>=expires)fail('VIDEO_DOWNLOAD_QUEUE_EXPIRED');
+      if(this.stopped||!this.allowed(kind,target)||!pluginEnabled(this.directory,'video-workbench',key))fail('CONVERSATION_NOT_ALLOWED');
+      return {executable:path.resolve(this.directory,this.hook.wechatExecutable),name:session.displayName,openVideo:true,videoSeconds:video.seconds,displaySeconds:video.displaySeconds,onlyVideo:video.onlyVideo,videoBefore:video.before,videoAfter:video.after,previousClicks};
+    };
+    const result=await this.foreground.send(prepare);
+    if(!result.accepted)fail(/^FOREGROUND_[A-Z_]+$/.test(result.code??'')?result.code:'FOREGROUND_VIDEO_UNAVAILABLE');
+    return {clicked:true};
+  }
+  async send(kind, target, text, deliveryId, proactive, mention, quoteServerId, receiptOnly=false) {
+    if(!receiptOnly&&kind==='group'&&groupMuted(this.directory,'wechat:group:'+target))fail('GROUP_MUTED');
     const key = `${kind}:${target}`;
     if (this.targetsSending.has(key) || this.targetsSending.size >= (this.hook.maxConcurrentSends ?? 4)) fail('SENDER_BUSY');
     this.targetsSending.add(key);
@@ -212,6 +242,7 @@ export class HookOneBot {
         else throw new AdapterError(attempt.rejection?.code??'NATIVE_SEND_REJECTED',{rejected:true,attempted:false,delivery_id:deliveryId??operation});
       }
       if(attempt?.state==='confirmed')attempt=null;
+      if(receiptOnly&&!attempt)fail('TEXT_RECEIPT_STATE_UNAVAILABLE');
       this.reload();
       if (!this.allowed(kind, target)) fail('CONVERSATION_NOT_ALLOWED');
       if(!attempt){
@@ -237,11 +268,13 @@ export class HookOneBot {
         };
         let accepted;
         try{
+          if(kind==='group'&&groupMuted(this.directory,'wechat:group:'+target))fail('GROUP_MUTED');
           if(mode==='foreground'){
             accepted=await this.foreground.send({executable:path.resolve(this.directory,this.hook.wechatExecutable),name:targetSession.displayName,text,...(quote?{quote:quotedText}:{})},async()=>{
               this.reload();if(!(quote?compatibilityMediaEnabled(this.project):this.project.wechat?.textTransport?.mode==='foreground')||!this.allowed(kind,target))fail('CONVERSATION_NOT_ALLOWED');
               if(quote&&(await this.checkNative()).account!==identity.account)fail('TEXT_DELIVERY_ACCOUNT_MISMATCH');
               const current=await this.foregroundTarget(kind,target);if(current.username!==wxid||current.displayName!==targetSession.displayName)fail('TARGET_MAPPING_AMBIGUOUS_OR_MISSING');
+              if(kind==='group'&&groupMuted(this.directory,'wechat:group:'+target))fail('GROUP_MUTED');
             });
             if(!accepted?.accepted)throw Error(accepted?.attempted===false&&/^FOREGROUND_[A-Z_]+$/.test(accepted.code??'')?accepted.code:'FOREGROUND_SUBMISSION_UNCONFIRMED');
             accepted={ret:0};
@@ -252,7 +285,7 @@ export class HookOneBot {
             reject(error.message);
             throw new AdapterError(error.message,{rejected:true,attempted:false,delivery_id:deliveryId??operation});
           }
-          if(/^API_HTTP_(400|401|403|409|429)$/.test(error.message)){
+          if(error.message==='GROUP_MUTED'||/^API_HTTP_(400|401|403|409|429)$/.test(error.message)){
             reject(error.message);
             throw new AdapterError(error.message==='API_HTTP_429'?'SENDER_BUSY':error.message,{rejected:true,attempted:false,delivery_id:deliveryId??operation});
           }
@@ -262,7 +295,7 @@ export class HookOneBot {
         if(accepted?.ret!==0){reject('NATIVE_SEND_REJECTED',accepted?.ret);throw new AdapterError('NATIVE_SEND_REJECTED',{rejected:true,attempted:false,delivery_id:deliveryId??operation});}
         attempt.state='accepted';this.textDeliveries.put(attempt);
       }
-      const deadline = Date.now() + (this.receiptOverride ?? this.hook.receiptTimeoutMs ?? 18000);
+      const deadline = Date.now() + (receiptOnly?0:(this.receiptOverride ?? this.hook.receiptTimeoutMs ?? 18000));
       try{
         do {
           const rows=await this.messages(wxid);
@@ -327,6 +360,7 @@ export class HookOneBot {
     fs.renameSync(temp,this.stickerStateFile);
   }
   async sendSticker(kind,target,id,deliveryId,proactive,receiptOnly=false,deferReceipt=false,deadlineAt,abandon=false){
+    if(!receiptOnly&&kind==='group'&&groupMuted(this.directory,'wechat:group:'+target))fail('GROUP_MUTED');
     this.stickerPending??=new Map();
     if(abandon&&(!deliveryId||!receiptOnly))fail('INVALID_RECEIPT_QUERY');
     this.reload();
@@ -399,16 +433,19 @@ export class HookOneBot {
           throw new AdapterError(code,{rejected:true,attempted:false,delivery_id:deliveryId??''});
         };
         let accepted;
-        try{accepted=mode==='foreground'?await this.foreground.send({executable:path.resolve(this.directory,this.hook.wechatExecutable),name:targetSession.displayName,favorite:true},async()=>{
+        try{
+        if(groupMuted(this.directory,conversationKey))fail('GROUP_MUTED');
+        accepted=mode==='foreground'?await this.foreground.send({executable:path.resolve(this.directory,this.hook.wechatExecutable),name:targetSession.displayName,favorite:true},async()=>{
           this.reload();
           if((this.project.wechat?.textTransport?.mode!=='foreground'&&!compatibilityStickersEnabled(this.project))||!this.allowed(kind,target)||!stickerPolicy(this.project.wechat,conversationKey).enabled)fail('CONVERSATION_NOT_ALLOWED');
           if(deadlineAt!==undefined&&Date.now()>=deadlineAt)fail('STICKER_DELIVERY_EXPIRED');
           if((await this.checkNative()).account!==identity.account)fail('STICKER_DELIVERY_ACCOUNT_MISMATCH');
           const current=await this.foregroundTarget(kind,target);
           if(current.username!==wxid||current.displayName!==targetSession.displayName)fail('TARGET_MAPPING_AMBIGUOUS_OR_MISSING');
+          if(groupMuted(this.directory,conversationKey))fail('GROUP_MUTED');
         }):await this.native('/SendStickerMsg',{wxidorgid:wxid,sticker:sticker.fields,path:sticker.path},identity.account);}
         catch(error){
-          if(/^API_HTTP_(400|401|403|409|429)$/.test(error.message))reject(error.message);
+          if(error.message==='GROUP_MUTED'||/^API_HTTP_(400|401|403|409|429)$/.test(error.message))reject(error.message);
           if(mode==='foreground'&&error instanceof AdapterError){
             this.stickerPending.delete(key);this.persistStickerPending();throw error;
           }
@@ -463,7 +500,8 @@ export class HookOneBot {
         if(params.wechatagent_defer_receipt!==undefined&&typeof params.wechatagent_defer_receipt!=='boolean')fail('INVALID_RECEIPT_QUERY');
         if(params.wechatagent_abandon_delivery!==undefined&&(typeof params.wechatagent_abandon_delivery!=='boolean'||params.wechatagent_abandon_delivery&&(!deliveryId||params.wechatagent_receipt_only!==true)))fail('INVALID_RECEIPT_QUERY');
         if(params.wechatagent_deadline_at!==undefined&&(!Number.isSafeInteger(params.wechatagent_deadline_at)||params.wechatagent_deadline_at<0||params.wechatagent_deadline_at>Date.now()+60000))fail('INVALID_DELIVERY_DEADLINE');
-        if(params.wechatagent_receipt_only===true&&(!deliveryId||!Array.isArray(params.message)||params.message.length!==1||params.message[0]?.type!=='wechat_sticker'))fail('INVALID_RECEIPT_QUERY');
+        if(params.wechatagent_receipt_only===true&&!deliveryId)fail('INVALID_RECEIPT_QUERY');
+        if(params.wechatagent_abandon_delivery===true&&(!Array.isArray(params.message)||params.message.length!==1||params.message[0]?.type!=='wechat_sticker'))fail('INVALID_RECEIPT_QUERY');
         if(params.wechatagent_source!==undefined&&params.wechatagent_source!=='proactive')fail('INVALID_SEND_SOURCE');
         if(params.wechatagent_source==='proactive'&&(!deliveryId||!/^[a-f0-9]{64}$/.test(params.wechatagent_context_id??'')||
           params.wechatagent_preceding_delivery_id!==undefined&&!/^[a-f0-9]{64}$/.test(params.wechatagent_preceding_delivery_id)))fail('INVALID_PROACTIVE_CONTEXT');
@@ -485,12 +523,14 @@ export class HookOneBot {
             const wxidMember=[...identities][0],name=String(params.wechatagent_mention?.name??'').trim();
             mention={id,wxid:wxidMember,name};
             if(!validMention(mention)||params.wechatagent_mention?.wxid!==wxidMember)fail('INVALID_WECHAT_MENTION');
-            data=await this.send(kind,target,text,deliveryId,proactive,mention);
+            data=await this.send(kind,target,text,deliveryId,proactive,mention,undefined,params.wechatagent_receipt_only===true);
           }else{
             const text=textSegments(params.message);
-            data=await this.send(kind,target,text,deliveryId,proactive,undefined,quoteServerId);
+            data=await this.send(kind,target,text,deliveryId,proactive,undefined,quoteServerId,params.wechatagent_receipt_only===true);
           }
         }
+      } else if(action==='open_received_video'){
+        data=await this.openVideo(params.kind,String(params.target??''),String(params.id??''),params.previousClicks);
       } else if(['get_sticker_list','get_sticker_labels','save_sticker_labels'].includes(action)){
         const kind=params.kind,target=String(params.target??'');
         if(!['group','private'].includes(kind)||!/^\d+$/.test(target))fail('INVALID_STICKER_TARGET');
@@ -527,12 +567,13 @@ export class HookOneBot {
   }
   incoming(payload) {
     this.reload();
-    if (payload?.event !== 'message.new' || ![1,3,34,47,PAT_TYPE,49,FORWARD_TYPE,QUOTE_TYPE,25769803825].includes(payload.type) || typeof payload.content !== 'string' || !payload.content.trim() || !payload.sessionId || !payload.talkerId || payload.isSend || payload.talkerId === this.ownWxid) return null;
+    if (payload?.event !== 'message.new' || ![1,3,34,43,47,PAT_TYPE,49,FORWARD_TYPE,QUOTE_TYPE,25769803825].includes(payload.type) || typeof payload.content !== 'string' || !payload.content.trim() || !payload.sessionId || !payload.talkerId || payload.isSend || payload.talkerId === this.ownWxid) return null;
     const forwardedRecord=[49,FORWARD_TYPE].includes(payload.type)?normalizeForwardedRecord(payload.forwardedRecord):null;
     const quoteReply=[49,QUOTE_TYPE].includes(payload.type)?normalizeQuoteReply(payload.quoteReply):null;
     if([49,FORWARD_TYPE,QUOTE_TYPE].includes(payload.type) && (!forwardedRecord && !quoteReply || forwardedRecord && quoteReply))return null;
     if ([3,47].includes(payload.type) && !/^[a-f0-9]{64}$/.test(payload.image?.id ?? '')) return null;
     if(payload.type===34&&(!/^[a-f0-9]{64}$/.test(payload.voice?.id??'')||!Number.isFinite(payload.voice.durationSeconds)||payload.voice.durationSeconds<=0||payload.voice.durationSeconds>60))return null;
+    if(payload.type===43&&!/^[a-f0-9]{64}$/.test(payload.video?.id??''))return null;
     if(payload.type===25769803825&&(!/^[a-f0-9]{64}$/.test(payload.file?.id??'')||typeof payload.file?.name!=='string'||!Number.isSafeInteger(payload.file?.size)||payload.file.size<0||payload.file.size>50*1024*1024))return null;
     if (payload.type === PAT_TYPE && (!this.ownWxid || payload.pat?.target !== cleanAccountId(this.ownWxid) || payload.pat?.actor !== payload.talkerId || payload.pat.actor === cleanAccountId(this.ownWxid))) return null;
     const group = payload.sessionId.includes('@chatroom'), kind = group ? 'group' : 'private';
@@ -549,6 +590,7 @@ export class HookOneBot {
     const content=quoteReply?(quoteReply.reply||'[引用回复，正文为空]'):payload.content;
     const segments = [{ type: 'text', data: { text: content } }];
     if(payload.type===34)segments.push({type:'record',data:{file:'wechatagent://voice/'+payload.voice.id,voice_id:payload.voice.id,duration:payload.voice.durationSeconds}});
+    if(payload.type===43)segments.push({type:'video',data:{file:'wechatagent://video/'+payload.video.id,media_id:payload.video.id}});
     if(payload.type===25769803825)segments.push({type:'file',data:{id:payload.file.id,name:payload.file.name,size:payload.file.size}});
     if ([3,47].includes(payload.type)) segments.push({type:'image',data:{file:'wechatagent://image/'+payload.image.id,media_id:payload.image.id,...(payload.type===47?{media_kind:'sticker'}:{})}});
     if (group && this.project.account.nicknames.some(n => content.includes('@' + n + '\u2005') || content.endsWith('@' + n))) segments.unshift({ type: 'at', data: { qq: String(selfId) } });

@@ -90,7 +90,7 @@ export class MessageBuffer {
     }
   }
 
-  append(message, { outgoing = false,skipReason } = {}) {
+  append(message, { outgoing = false,skipReason,processed = false } = {}) {
     const key = buildConversationKey(message.platform, message.kind, message.conversation_id);
     if(!outgoing){const existing=this.findIncoming(message);if(existing)return existing;}
     const row = { id: crypto.randomUUID(), platform: message.platform, kind: message.kind,
@@ -103,8 +103,10 @@ export class MessageBuffer {
       ...(message.assistant_chat_only===true?{assistant_chat_only:true}:{}),
       text: String(message.text ?? '').slice(0, 4000), timestamp: Number(message.timestamp) || Date.now() / 1000,
       images: outgoing ? [] : (message.images ?? []).filter(image => /^[a-f0-9]{64}$/.test(image?.id ?? '')).slice(0,4),
+      ...(!outgoing&&/^[a-f0-9]{64}$/.test(message.videoId??'')?{videoId:message.videoId}:{}),
+      ...(!outgoing&&message.videoId&&typeof message.videoObservation==='string'?{videoObservation:message.videoObservation.slice(0,8800),videoRevision:message.videoRevision}:{}),
       files:outgoing?[]:(message.files??[]).filter(file=>/^[a-f0-9]{64}$/.test(file?.id??'')&&typeof file.name==='string'&&file.name.length<=180&&Number.isSafeInteger(file.size)&&file.size>=0&&file.size<=50*1024*1024).slice(0,3),
-      direct_mention: Boolean(message.direct_mention), outgoing, processed: outgoing };
+      direct_mention: Boolean(message.direct_mention), outgoing, processed: outgoing||processed };
     if(!outgoing && message.interaction==='pat')row.interaction='pat';
     const record=!outgoing && normalizeForwardedRecord(message.forwardedRecord);
     if(record)row.forwardedRecord=record;
@@ -116,7 +118,7 @@ export class MessageBuffer {
       this.contextNotices.set(key,{id:crypto.randomUUID(),text:'离线旧消息仅作为背景，不能逐条补答或自动执行旧任务。请根据恢复后的当前新消息处理。'});
     }
     const rows = this.chats.get(key) ?? [];
-    this.archive?.append(key,row,{fullText:message.text});
+    if(!row.videoObservation)this.archive?.append(key,row,{fullText:message.text});
     rows.push(row);
     if (rows.length > this.maxPerChat) rows.splice(0, rows.length - this.maxPerChat);
     this.chats.set(key, rows);

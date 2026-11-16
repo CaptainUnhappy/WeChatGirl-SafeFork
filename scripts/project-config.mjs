@@ -79,6 +79,7 @@ export function validateConfig(config) {
     const url = new URL(config.hook?.baseUrl ?? '');
     if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error('Hook API must be an HTTP loopback base URL');
     if (!hookProfile(config.hook.expectedVersion) || !config.hook.wechatExecutable || /[\r\n"\0]/.test(config.hook.wechatExecutable)) throw new Error('Configure a matching WeChat executable for version 4.1.10.27 or 4.1.15.13');
+    if(config.hook.cancelUpdateAndRestart!==undefined&&typeof config.hook.cancelUpdateAndRestart!=='boolean')throw new Error('WECHAT_UPDATE_OPTION_INVALID');
     for (const [key, low, high] of [['requestTimeoutMs',1000,5000],['receiptTimeoutMs',1000,18000],['maxConcurrentSends',1,4]]) {
       const value = config.hook[key];
       if (!Number.isInteger(value) || value < low || value > high) throw new Error('Invalid Hook ' + key);

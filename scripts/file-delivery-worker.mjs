@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {FileTransfers} from '../packages/dsh-social-bridge-plugin/file-transfers.mjs';
 import {compatibilityMediaEnabled} from '../packages/wechat-send-policy.mjs';
+import {suppressedGroupJob} from '../packages/plugin-api/group-mute.mjs';
 const terminal=new Set(['confirmed','failed','unconfirmed','cancelled','expired']);
 const rowKey=row=>JSON.stringify([row.localId,row.serverId,row.createTime]);
 const safeError=error=>/^[A-Z][A-Z0-9_]{2,80}$/.test(error?.code??error?.message)?error.code??error.message:'FILE_DELIVERY_FAILED';
@@ -14,6 +15,7 @@ export class FileDeliveryWorker {
   }}
   async run(job){
     const adapter=this.adapter;
+    if(job.state==='queued'&&suppressedGroupJob(adapter.directory,job.key,job.createdAt)){job.state='cancelled';job.error='GROUP_MUTED';this.save(job);return;}
     const mode=JSON.parse(fs.readFileSync(path.join(adapter.directory,'config/wechatagent.json'),'utf8')).wechat?.textTransport?.mode;
     if(mode==='foreground'){job.state='failed';job.error='FILE_DISABLED_IN_FOREGROUND';this.save(job);return;}
     if(job.accountScope!==this.store.account()||!this.store.allowed(job.key,job.sender)){job.state='cancelled';job.error='FILE_ACCESS_CHANGED';this.save(job);return;}
@@ -28,6 +30,7 @@ export class FileDeliveryWorker {
       const source=this.store.staged(job),proof=await this.store.hash(source,AbortSignal.timeout(10000));if(proof.sha256!==job.sha256||proof.md5!==job.md5||proof.size!==job.size)throw Error('FILE_STAGED_INVALID');
       job.wxid=wxid;job.account=identity.account;job.baseline=(await adapter.messages(wxid)).map(rowKey);job.startedAt=Date.now();
       if(this.stopped||!this.store.allowed(job.key,job.sender)||job.accountScope!==this.store.account()){job.state='cancelled';job.error='FILE_ACCESS_CHANGED';this.save(job);return;}
+      if(suppressedGroupJob(adapter.directory,job.key,job.createdAt)){job.state='cancelled';job.error='GROUP_MUTED';this.save(job);return;}
       job.state='submitting';this.save(job); // Persist BEFORE native submission.
       try{
         if(viaWindow){
@@ -40,6 +43,7 @@ export class FileDeliveryWorker {
             if((await adapter.checkNative()).account!==identity.account)throw Error('FILE_ACCOUNT_CHANGED');
             const current=await adapter.foregroundTarget(kind,target);
             if(current.username!==wxid||current.displayName!==session.displayName)throw Error('FILE_TARGET_CHANGED');
+            if(suppressedGroupJob(adapter.directory,job.key,job.createdAt))throw Error('GROUP_MUTED');
           });
           if(result?.accepted!==true&&result?.attempted===false){job.state='failed';job.error=safeError({code:result.code});this.save(job);return;}
           if(result?.accepted!==true)job.error='FILE_SUBMISSION_UNCERTAIN';
@@ -49,6 +53,7 @@ export class FileDeliveryWorker {
         }
       }
       catch(error){
+        if(error.message==='GROUP_MUTED'){job.state='cancelled';job.error='GROUP_MUTED';this.save(job);return;}
         // An explicit pre-submission 429 can be retried a bounded number of
         // times. Network failures remain uncertain and are never resubmitted.
         if(error.message==='API_HTTP_429'&&(job.busyAttempts??0)<3){job.state='queued';job.busyAttempts=(job.busyAttempts??0)+1;delete job.startedAt;this.save(job);return;}

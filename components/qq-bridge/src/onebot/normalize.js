@@ -16,6 +16,7 @@ export function normalizeOneBotEvent(platform, adapter, event) {
     .map((segment) => String(segment.data?.text ?? '')).join('').trim();
   const types = [...new Set(segments.map((segment) => segment?.type).filter(Boolean))];
   const voice=platform==='wechat'?segments.find(segment=>segment?.type==='record'&&/^[a-f0-9]{64}$/.test(segment.data?.voice_id??'')&&segment.data.file==='wechatagent://voice/'+segment.data.voice_id&&Number.isFinite(segment.data.duration)&&segment.data.duration>0&&segment.data.duration<=60):null;
+  const video=platform==='wechat'?segments.find(segment=>segment?.type==='video'&&/^[a-f0-9]{64}$/.test(segment.data?.media_id??'')&&segment.data.file==='wechatagent://video/'+segment.data.media_id):null;
   const images = segments.filter(segment => segment?.type === 'image' && /^[a-f0-9]{64}$/.test(segment.data?.media_id ?? '') && segment.data?.file === 'wechatagent://image/'+segment.data.media_id)
     .map(segment => ({id:segment.data.media_id,...(platform==='wechat'&&segment.data.media_kind==='sticker'?{kind:'sticker'}:{})}));
   const files=platform==='wechat'?segments.filter(segment=>segment?.type==='file'&&/^[a-f0-9]{64}$/.test(segment.data?.id??'')&&typeof segment.data?.name==='string'&&segment.data.name.length<=180&&Number.isSafeInteger(segment.data.size)&&segment.data.size>=0&&segment.data.size<=50*1024*1024).slice(0,3).map(segment=>({id:segment.data.id,name:segment.data.name,size:segment.data.size})):[];
@@ -31,8 +32,9 @@ export function normalizeOneBotEvent(platform, adapter, event) {
     sender_name: String(event.sender?.card ?? event.sender?.nickname ?? senderId),
     ...(platform==='wechat'&&kind==='group'&&/^[a-f0-9]{64}$/.test(event.wechatagent?.memberId??'')?{sender_key:event.wechatagent.memberId}:{}),
     self_id: String(event.self_id ?? ''), message_id: String(event.message_id ?? `local-${fingerprint}`),
-    message_type: messageType ?? 'unknown', text: text || (images.length ? '[图片]' : voice ? '[语音，尚未转写]' : ''), images, files, timestamp, segments, raw: event,
+    message_type: messageType ?? 'unknown', text: text || (images.length ? '[图片]' : voice ? '[语音，尚未转写]' : video ? '[视频]' : ''), images, files, timestamp, segments, raw: event,
     ...(voice?{voice:{id:voice.data.voice_id,durationSeconds:voice.data.duration}}:{}),
+    ...(video?{videoId:video.data.media_id}:{}),
     ...(platform==='wechat' && event.wechatagent?.interaction==='pat'?{interaction:'pat'}:{}),
     ...(platform==='wechat' && normalizeForwardedRecord(event.wechatagent?.forwardedRecord)?{forwardedRecord:normalizeForwardedRecord(event.wechatagent.forwardedRecord)}:{}),
     ...(quoteReply?{quoteReply}:{}),

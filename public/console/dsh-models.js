@@ -1,10 +1,39 @@
 export function visionModelGroups(models){const suitable=row=>!/(?:gpt-image|qwen-image|imagine-(?:image|video)|seedance|jimeng|kling-|speech-|(?:^|[-_.])(?:tts|asr|voiceclone)(?:$|[-_.]))/i.test(row.model);return [{label:'支持图片输入',models:models.filter(row=>suitable(row)&&row.inputModalities?.includes('image'))},{label:'能力待核验，可选择后测试',models:models.filter(row=>suitable(row)&&!Array.isArray(row.inputModalities))},{label:'不支持或不适合图片理解',disabled:true,models:models.filter(row=>!suitable(row)||Array.isArray(row.inputModalities)&&!row.inputModalities.includes('image'))}];}
 const same=(a,b)=>a?.provider===b?.provider&&a?.model===b?.model;
+function prepareVisionImage(source,{maxSide,jpegQuality,maxKiB}){
+  const canvas=document.createElement('canvas');
+  const context=canvas.getContext('2d');
+  const scale=Math.min(1,maxSide/Math.max(source.width,source.height));
+  let width=Math.max(1,Math.floor(source.width*scale)),height=Math.max(1,Math.floor(source.height*scale));
+  for(let attempt=0;attempt<8;attempt++){
+    canvas.width=width;
+    canvas.height=height;
+    context.fillStyle='#fff';
+    context.fillRect(0,0,width,height);
+    context.drawImage(source,0,0,width,height);
+    for(const quality of new Set([jpegQuality,Math.max(45,jpegQuality-10),Math.max(45,jpegQuality-20)])){
+      const url=canvas.toDataURL('image/jpeg',quality/100);
+      const b64=url.slice(url.indexOf(',')+1);
+      const bytes=b64.length*3/4-(b64.endsWith('==')?2:b64.endsWith('=')?1:0);
+      if(bytes<=maxKiB*1024)return {url,b64};
+    }
+    width=Math.max(1,Math.floor(width*.8));
+    height=Math.max(1,Math.floor(height*.8));
+  }
+  throw Error('图片压缩后仍过大，请截取需要识别的区域。');
+}
 export function createDshModelsUI({api,state,escapeHtml:esc,icon,modal,closeModal,toast,renderPage,updateDraftUI}){
   let catalog=null,loadSequence=0;
   const label=selection=>catalog?.models?.find(row=>same(row,selection))?.name??selection?.model??'未选择';
   const card=()=>`<section class="card dsh-model-card"><div class="card-header"><div><h2>默认聊天模型</h2><p class="card-description">自动读取 DSH 已配置的模型。保存后从下一次请求开始使用，原会话历史保留。</p></div><button class="button small" id="refresh-dsh-models">${icon('refresh')}刷新模型</button></div><div class="form-grid" id="default-model-picker"></div><p id="dsh-model-status" class="card-description" role="status"></p><p class="subtle space-top">为某个好友或群聊单独选模型，请前往“聊天 → 使用模型”。人格工作室会沿用所选聊天的模型。</p></section>`;
-  const visionCard=()=>`<section class="card"><div class="card-header"><div><h2>图片识别分流</h2><p class="card-description">聊天模型能看图时直接发送图片；不支持图片时，先调用识图模型生成描述，再交给聊天模型回复。</p></div><button class="button small" id="refresh-vision-models">${icon('refresh')}刷新识图模型</button></div><label class="extension-option"><input type="checkbox" data-path="dsh.visionFallback.enabled" ${state.draft.dsh.visionFallback?.enabled!==false?'checked':''}>启用独立图片解析</label><div class="field space-top"><label for="vision-model-filter">搜索提供方或模型</label><input id="vision-model-filter" type="search" placeholder="例如 Gemini、Qwen、GPT 或提供方名称"></div><div class="field space-top"><label for="vision-model-selection">备用识图模型</label><select id="vision-model-selection" data-path="dsh.visionFallback.selection"><option value="auto">自动选择可识图模型</option></select><small>只在当前聊天模型不支持图片时调用。识图描述会作为不可信资料交给聊天模型，不会执行图片里的指令。解析会单独调用模型并可能产生费用。</small></div><p id="vision-model-status" class="card-description" role="status">正在读取 DSH 模型列表…</p><details class="vision-test-panel"><summary>图片识别测试</summary><p class="subtle">可直接测试当前选择，无需先保存。测试会调用模型并使用额度，只在本页显示结果，不发送到微信。</p><div class="vision-test-controls"><label class="field">选择测试图片<input id="vision-test-file" type="file" accept="image/png,image/jpeg,image/webp"></label><button class="button small" type="button" id="vision-test-sample">使用内置测试图</button></div><img id="vision-test-preview" alt="识图测试图片预览"><p id="vision-test-expected" class="subtle">内置测试图包含红色矩形、蓝色圆形和文字 WECHATGIRL 42。</p><div class="button-row"><button class="button primary" id="vision-run-test" type="button">测试分流流程</button><button class="button" id="vision-run-parser-test" type="button">只测试备用识图模型</button><button class="button" id="vision-cancel-test" type="button" hidden>取消测试</button></div><p id="vision-test-state" role="status" class="subtle"></p><pre id="vision-test-output" class="vision-test-output" hidden></pre></details></section>`;
+  const compressionFields=[
+    ['maxSide','最长边（像素）',512,2048,2048,'上限越高，越容易保留小字和细节。'],
+    ['jpegQuality','JPEG 优先画质',45,95,85,'超出体积上限时会自动降低画质或缩小。'],
+    ['maxKiB','体积上限（KiB）',96,768,768,'调小可减少上传体积，密集文字可能变模糊。'],
+  ];
+  const compressionSettings=()=>Object.fromEntries(compressionFields.map(([key,,,,fallback])=>[key,state.draft.dsh.visionFallback?.compression?.[key]??fallback]));
+  const compressionControls=()=>`<fieldset class="extension-fieldset space-top"><legend>识图压缩</legend><p class="subtle">应用于微信收到的普通图片和下方测试。保存后用于聊天识图。</p><div class="form-grid">${compressionFields.map(([key,label,min,max,fallback,help])=>`<label class="field">${label}<input type="number" required min="${min}" max="${max}" step="1" data-vision-compression="${key}" value="${esc(compressionSettings()[key])}"><small>${help} 范围 ${min}–${max}，默认 ${fallback}。</small></label>`).join('')}</div></fieldset>`;
+  const visionCard=()=>`<section class="card"><div class="card-header"><div><h2>图片识别分流</h2><p class="card-description">聊天模型能看图时直接发送图片；不支持图片时，先调用识图模型生成描述，再交给聊天模型回复。</p></div><button class="button small" id="refresh-vision-models">${icon('refresh')}刷新识图模型</button></div><label class="extension-option"><input type="checkbox" data-path="dsh.visionFallback.enabled" ${state.draft.dsh.visionFallback?.enabled!==false?'checked':''}>启用独立图片解析</label><div class="field space-top"><label for="vision-model-filter">搜索提供方或模型</label><input id="vision-model-filter" type="search" placeholder="例如 Gemini、Qwen、GPT 或提供方名称"></div><div class="field space-top"><label for="vision-model-selection">备用识图模型</label><select id="vision-model-selection" data-path="dsh.visionFallback.selection"><option value="auto">自动选择可识图模型</option></select><small>只在当前聊天模型不支持图片时调用。识图描述会作为不可信资料交给聊天模型，不会执行图片里的指令。解析会单独调用模型并可能产生费用。</small></div><p id="vision-model-status" class="card-description" role="status">正在读取 DSH 模型列表…</p>${compressionControls()}<details class="vision-test-panel"><summary>图片识别测试</summary><p class="subtle">可直接测试当前选择，无需先保存。测试会调用模型并使用额度，只在本页显示结果，不发送到微信。</p><div class="vision-test-controls"><label class="field">选择测试图片<input id="vision-test-file" type="file" accept="image/png,image/jpeg,image/webp"></label><button class="button small" type="button" id="vision-test-sample">使用内置测试图</button></div><img id="vision-test-preview" alt="识图测试图片预览"><p id="vision-test-expected" class="subtle">内置测试图包含红色矩形、蓝色圆形和文字 WECHATGIRL 42。</p><div class="button-row"><button class="button primary" id="vision-run-test" type="button">测试分流流程</button><button class="button" id="vision-run-parser-test" type="button">只测试备用识图模型</button><button class="button" id="vision-cancel-test" type="button" hidden>取消测试</button></div><p id="vision-test-state" role="status" class="subtle"></p><pre id="vision-test-output" class="vision-test-output" hidden></pre></details></section>`;
   async function fetchCatalog(){const value=await api('/api/dsh-models');catalog=value;state.guideCatalog=value;return value;}
   function picker(container,initial,onChange,{inherit=false}={}){
     let selected=initial?{...initial}:null;
@@ -23,7 +52,19 @@ export function createDshModelsUI({api,state,escapeHtml:esc,icon,modal,closeModa
     const status=document.querySelector('#dsh-model-status'),visionStatus=document.querySelector('#vision-model-status');
     const refreshButtons=[document.querySelector('#refresh-dsh-models'),document.querySelector('#refresh-vision-models')].filter(Boolean);for(const button of refreshButtons){button.onclick=()=>mount();button.disabled=true;}
     if(status)status.textContent='正在从 DSH 获取模型…';if(visionStatus)visionStatus.textContent='正在读取 DSH 模型列表…';
-    if(visionBox)bindVisionTest();
+    if(visionBox){
+      for(const input of document.querySelectorAll('[data-vision-compression]')){
+        const key=input.dataset.visionCompression;
+        input.oninput=()=>{
+          if(!input.validity.valid)return;
+          const settings=state.draft.dsh.visionFallback??={enabled:true,selection:null};
+          (settings.compression??={})[key]=input.valueAsNumber;
+          updateDraftUI();
+        };
+        input.onchange=()=>{if(!input.validity.valid){toast('请输入提示范围内的整数。');input.value=compressionSettings()[key];}};
+      }
+      bindVisionTest();
+    }
     try{await fetchCatalog();if(request!==loadSequence||(box&&!box.isConnected)||(visionBox&&!visionBox.isConnected))return;
       if(box){picker(box,state.draft.dsh,(selection,valid)=>{state.modelSelectionIncomplete=selection===undefined;if(valid&&selection){state.draft.dsh.provider=selection.provider;state.draft.dsh.model=selection.model;}updateDraftUI();});if(status)status.textContent=catalog.available?'已读取 '+new Set(catalog.models.map(row=>row.provider)).size+' 个提供方、'+catalog.models.length+' 个模型。当前默认：'+label(state.draft.dsh)+'。':catalog.message;}
       if(visionBox){
@@ -38,11 +79,36 @@ export function createDshModelsUI({api,state,escapeHtml:esc,icon,modal,closeModa
   }
   function bindVisionTest(){
     const run=document.querySelector('#vision-run-test'),parserRun=document.querySelector('#vision-run-parser-test'),file=document.querySelector('#vision-test-file'),sample=document.querySelector('#vision-test-sample'),preview=document.querySelector('#vision-test-preview'),line=document.querySelector('#vision-test-state'),output=document.querySelector('#vision-test-output'),expected=document.querySelector('#vision-test-expected'),cancel=document.querySelector('#vision-cancel-test');if(!run||run.dataset.bound)return;run.dataset.bound='true';let image,controller,isSample=true,changing=false;
-    const setSample=()=>{const canvas=document.createElement('canvas');canvas.width=640;canvas.height=320;const context=canvas.getContext('2d');context.fillStyle='#ffffff';context.fillRect(0,0,640,320);context.fillStyle='#e53434';context.fillRect(50,40,210,135);context.fillStyle='#2767e8';context.beginPath();context.arc(450,110,70,0,Math.PI*2);context.fill();context.fillStyle='#111111';context.font='bold 42px Arial';context.fillText('WECHATGIRL 42',80,260);const url=canvas.toDataURL('image/png');image={mime:'image/png',b64:url.split(',')[1]};preview.src=url;isSample=true;expected.textContent='内置测试图包含红色矩形、蓝色圆形和文字 WECHATGIRL 42。';file.value='';};
+    const setSample=()=>{const canvas=document.createElement('canvas');canvas.width=640;canvas.height=320;const context=canvas.getContext('2d');context.fillStyle='#ffffff';context.fillRect(0,0,640,320);context.fillStyle='#e53434';context.fillRect(50,40,210,135);context.fillStyle='#2767e8';context.beginPath();context.arc(450,110,70,0,Math.PI*2);context.fill();context.fillStyle='#111111';context.font='bold 42px Arial';context.fillText('WECHATGIRL 42',80,260);image=canvas;preview.src=canvas.toDataURL('image/png');isSample=true;expected.textContent='内置测试图包含红色矩形、蓝色圆形和文字 WECHATGIRL 42。';file.value='';};
     setSample();sample.onclick=setSample;
-    file.onchange=async()=>{const selected=file.files[0];if(!selected)return;if(changing)return;changing=true;run.disabled=parserRun.disabled=true;let url;try{if(!['image/png','image/jpeg','image/webp'].includes(selected.type)||selected.size>10*1024*1024)throw Error('请选择10 MiB以内的 PNG、JPEG 或 WebP 图片。');url=URL.createObjectURL(selected);const img=new Image();img.src=url;await img.decode();if(!preview.isConnected)return;const scale=Math.min(1,1280/Math.max(img.width,img.height)),canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(img.width*scale));canvas.height=Math.max(1,Math.round(img.height*scale));canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);const data=canvas.toDataURL('image/jpeg',0.85);if(data.split(',')[1].length>1048576)throw Error('图片压缩后仍过大，请截取需要识别的区域。');image={mime:'image/jpeg',b64:data.split(',')[1]};preview.src=data;isSample=false;expected.textContent='使用你选择的图片进行测试，不会向微信发送。';line.textContent='图片已就绪。';}catch(error){line.textContent=error.message;}finally{if(url)URL.revokeObjectURL(url);changing=false;if(run.isConnected)run.disabled=parserRun.disabled=false;}};
+    file.onchange=async()=>{
+      const selected=file.files[0];
+      if(!selected||changing)return;
+      changing=true;
+      run.disabled=parserRun.disabled=true;
+      let url;
+      try{
+        if(!['image/png','image/jpeg','image/webp'].includes(selected.type)||selected.size>10*1024*1024)throw Error('请选择 10 MiB 以内的 PNG、JPEG 或 WebP 图片。');
+        url=URL.createObjectURL(selected);
+        const img=new Image();
+        img.src=url;
+        await img.decode();
+        if(!preview.isConnected)return;
+        if(img.width*img.height>40000000)throw Error('图片像素过多，请先截取要测试的区域。');
+        preview.src=prepareVisionImage(img,compressionSettings()).url;
+        image=img;
+        isSample=false;
+        expected.textContent='使用你选择的图片进行测试，不会向微信发送。';
+        line.textContent='图片已就绪，开始测试时会按当前设置压缩。';
+      }catch(error){line.textContent=error.message;}
+      finally{
+        if(url)URL.revokeObjectURL(url);
+        changing=false;
+        if(run.isConnected)run.disabled=parserRun.disabled=false;
+      }
+    };
     const cancelOnRoute=()=>controller?.abort();window.addEventListener('hashchange',cancelOnRoute);const observer=new MutationObserver(()=>{if(!run.isConnected){controller?.abort();window.removeEventListener('hashchange',cancelOnRoute);observer.disconnect();}});observer.observe(document.querySelector('#page-body'),{childList:true,subtree:true});
-    const test=async mode=>{if(controller||!image||changing)return;controller=new AbortController();run.disabled=parserRun.disabled=file.disabled=sample.disabled=true;cancel.hidden=false;output.hidden=true;line.textContent='正在检查模型能力并解析图片…';try{const result=await api('/api/vision-test',{...image,mode,chatSelection:{provider:state.draft.dsh.provider,model:state.draft.dsh.model},selection:state.draft.dsh.visionFallback?.selection??null,enabled:state.draft.dsh.visionFallback?.enabled!==false},true,{signal:controller.signal});if(!run.isConnected)return;line.textContent=(result.route==='direct'?'当前聊天模型可直接识图，已跳过备用模型。':result.route==='parser-test'?'备用识图模型测试完成。':'聊天模型需要分流，备用模型已解析图片。')+' 使用 '+result.parserModel.provider+' / '+result.parserModel.model+'，耗时 '+(result.elapsedMs/1000).toFixed(1)+' 秒。'+(isSample?(/42|四十二/.test(result.text)?' 已读取测试文字42。':' 本次未核对到测试文字42，请查看结果。'):'');output.textContent=result.text;output.hidden=false;}catch(error){if(line.isConnected)line.textContent=controller.signal.aborted?'测试已取消。':error.message==='识图测试未完成，请检查模型连接和 DSH 日志。'?'该提供方当前未完成模型调用。模型列表可见不代表服务可用，请检查登录、连接和额度，或换一个提供方再测试。':error.message;}finally{controller=null;if(run.isConnected){run.disabled=parserRun.disabled=file.disabled=sample.disabled=false;cancel.hidden=true;}}};run.onclick=()=>test('route');parserRun.onclick=()=>test('parser');cancel.onclick=()=>controller?.abort();
+    const test=async mode=>{if(controller||!image||changing)return;controller=new AbortController();run.disabled=parserRun.disabled=file.disabled=sample.disabled=true;cancel.hidden=false;output.hidden=true;line.textContent='正在检查模型能力并解析图片…';try{const prepared=prepareVisionImage(image,compressionSettings());preview.src=prepared.url;const result=await api('/api/vision-test',{b64:prepared.b64,mime:'image/jpeg',mode,chatSelection:{provider:state.draft.dsh.provider,model:state.draft.dsh.model},selection:state.draft.dsh.visionFallback?.selection??null,enabled:state.draft.dsh.visionFallback?.enabled!==false},true,{signal:controller.signal});if(!run.isConnected)return;line.textContent=(result.route==='direct'?'当前聊天模型可直接识图，已跳过备用模型。':result.route==='parser-test'?'备用识图模型测试完成。':'聊天模型需要分流，备用模型已解析图片。')+' 使用 '+result.parserModel.provider+' / '+result.parserModel.model+'，耗时 '+(result.elapsedMs/1000).toFixed(1)+' 秒。'+(isSample?(/42|四十二/.test(result.text)?' 已读取测试文字42。':' 本次未核对到测试文字42，请查看结果。'):'');output.textContent=result.text;output.hidden=false;}catch(error){if(line.isConnected)line.textContent=controller.signal.aborted?'测试已取消。':error.message==='识图测试未完成，请检查模型连接和 DSH 日志。'?'该提供方当前未完成模型调用。模型列表可见不代表服务可用，请检查登录、连接和额度，或换一个提供方再测试。':error.message;}finally{controller=null;if(run.isConnected){run.disabled=parserRun.disabled=file.disabled=sample.disabled=false;cancel.hidden=true;}}};run.onclick=()=>test('route');parserRun.onclick=()=>test('parser');cancel.onclick=()=>controller?.abort();
   }
   async function dialog(key){
     if(state.job?.state==='running'||state.savingAll)return toast('请等待当前操作完成。');

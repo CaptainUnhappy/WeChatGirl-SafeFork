@@ -92,5 +92,5 @@ export function createExtensionUI({api,modal,closeModal,confirmAction,escapeHtml
     const id=button?.dataset.extension ?? (!event.target.closest('a,input,select,textarea,button')?event.target.closest('[data-extension-card]')?.dataset.extensionCard:null);
     if(id)dialog(id);
   });
-  return {page,pluginsPage:options=>plugins.page(options),dshPage:()=>dshUI.page()};
+  return {page,pluginsPage:options=>plugins.page(options),mountVideo:element=>plugins.mountVideo(element),dshPage:()=>dshUI.page()};
 }

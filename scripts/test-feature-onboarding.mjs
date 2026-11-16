@@ -20,3 +20,7 @@ test('dedicated sending page and deep-linked setup steps are routed without acce
  assert.deepEqual(consoleRoute('#sending'),{page:'sending'});assert.deepEqual(consoleRoute('#setup/features'),{page:'setup',section:'features'});assert.deepEqual(consoleRoute('#setup/sending'),{page:'setup',section:'sending'});assert.deepEqual(consoleRoute('#setup/unknown'),{page:'setup'});
  assert.deepEqual(consoleRoute('#plugins/voice-studio'),{page:'plugins',section:'voice-studio'});assert.deepEqual(consoleRoute('#plugins/not_valid'),{page:'plugins'});
 });
+test('video recognition uses the dedicated page from the sidebar and existing plugin links',()=>{
+ assert.deepEqual(consoleRoute('#video'),{page:'video'});
+ assert.deepEqual(consoleRoute('#plugins/video-workbench'),{page:'video'});
+});

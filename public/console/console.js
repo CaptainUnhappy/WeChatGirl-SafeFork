@@ -62,6 +62,7 @@ const pages = {
   constellation: ['记忆星图', '查看人物、日常聊天中记录的事件，以及最近召回的记忆。'],
   voice: ['语音音色', '选择本地模型、管理自定义音色与语音回复。'],
   music: ['音乐', '登录网易云、搜索歌曲并查看本机已加载的曲库。'],
+  video: ['视频识别', '设置微信视频自动识别、选择模型，并测试本地视频。'],
   sending: ['发送模式', '选择微信发送方式，并查看两种模式下可用的功能。'],
 };
 const actions = {
@@ -111,7 +112,22 @@ window.desktop?.onShutdownState?.(phase=>{
   if(state.shuttingDown){$('#connection-label').innerHTML='<i class="dot"></i><span>正在停止后台服务…</span>';}
   else if(['idle','failed'].includes(phase)){state.closed=false;void refreshStatus();}
 });
-function toast(message) { $('#toast').textContent = message; $('#toast').hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => { $('#toast').hidden = true; }, 4200); }
+function closeToast(){
+  clearTimeout(toast.timer);
+  $('#toast').hidden=true;
+}
+function toast(message,{error=false,onDetails}={}){
+  if(!error&&!$('#toast').hidden&&$('#toast-action').onclick)return;
+  clearTimeout(toast.timer);
+  const host=$('#toast'),action=$('#toast-action');
+  host.dataset.tone=error?'error':'info';
+  $('#toast-message').textContent=message;
+  action.hidden=!onDetails;
+  action.onclick=onDetails?()=>{closeToast();onDetails();}:null;
+  host.hidden=false;
+  if(!error)toast.timer=setTimeout(closeToast,5000);
+}
+$('#toast-close').addEventListener('click',closeToast);
 function showError(message) { $('#connection-error').textContent = message; $('#connection-error').hidden = false; }
 function updateDraftUI() {
   $('#save-bar').hidden = !hasDraft(); document.body.classList.toggle('has-draft', hasDraft());
@@ -127,7 +143,7 @@ function updateDraftUI() {
   if($('#delete-role'))$('#delete-role').disabled=state.savingAll||roleSaves.size>0||!!state.deletingRole||state.job?.state==='running';
 }
 async function api(route, body, retry = true, options = {}) {
-  const response = await fetch(route, { method: body === undefined ? 'GET' : 'POST', headers: { 'X-Console-Token': state.token, ...(body !== undefined ? { 'Content-Type': options.binary?'application/octet-stream':'application/json' } : {}) }, ...(body !== undefined ? { body: options.binary?body:JSON.stringify(body) } : {}), signal: AbortSignal.any([...(options.signal?[options.signal]:[]),AbortSignal.timeout(route.startsWith('/api/video-workbench?') ? 115000 : route === '/api/plugins/bundle/download' ? 70000 : route === '/api/vision-test' ? 65000 : /^\/api\/plugins\/speech-recognition\/(?:models|check)$/.test(route) ? 42000 : ['/api/voice-studio/preview-voice','/api/voice-studio/preview-engine','/api/voice-studio/compare-engines'].includes(route) ? 150000 : route === '/api/browse' ? 180000 : route === '/api/fish-notebook/write' || /^\/api\/plugins\/[^/]+\/actions\//.test(route) ? 45000 : 20000)]) });
+  const response = await fetch(route, { method: body === undefined ? 'GET' : 'POST', headers: { 'X-Console-Token': state.token, ...(body !== undefined ? { 'Content-Type': options.binary?'application/octet-stream':'application/json' } : {}) }, ...(body !== undefined ? { body: options.binary?body:JSON.stringify(body) } : {}), signal: AbortSignal.any([...(options.signal?[options.signal]:[]),AbortSignal.timeout(route.startsWith('/api/video-workbench?') ? 210000 : route === '/api/plugins/bundle/download' ? 70000 : route === '/api/vision-test' ? 65000 : /^\/api\/plugins\/speech-recognition\/(?:models|check)$/.test(route) ? 42000 : ['/api/voice-studio/preview-voice','/api/voice-studio/preview-engine','/api/voice-studio/compare-engines'].includes(route) ? 150000 : route === '/api/browse' ? 180000 : route === '/api/fish-notebook/write' || /^\/api\/plugins\/[^/]+\/actions\//.test(route) ? 45000 : 20000)]) });
   const result = await response.json();
   if (response.status === 401 && retry) {
     const info = await fetch('/api/info').then(r => r.json());
@@ -430,7 +446,7 @@ function connectionsPage() {
   const r = state.reader;
   state.readerDraft ??= { dbPath: r?.dbPath ?? '', myWxid: r?.myWxid ?? '', decryptKey: '' };
   return `<div class="section-stack">${dshModels.card()}${dshModels.visionCard()}<section class="card">${header('模型连接', '使用你已在 DSH 中配置的模型。', '', 'plug')}<div class="form-grid">${field('DSH 程序位置', 'runtime.dshDesktop', { full: true, browse: 'exe', placeholder: '选择 DeepSeek Harness.exe', help: '启动时若 DSH 尚未打开，会尝试打开这个程序。' })}</div>${pluginPathField()}<div class="notice plain">${icon('info')}<span>模型从 DSH 列表选择并保存后，下一次请求生效，无需重开 DSH。</span></div></section>
-    ${wechatClientsCard()}<section class="card">${header('微信与读取程序', '选择本机已准备的程序。', '', 'chat')}<div class="form-grid">${field('匹配微信程序位置', 'hook.wechatExecutable', { full: true, browse: 'exe', help: '自动检测结果见上方版本卡。内置匹配版为 4.1.15.13 x64。版本卡会分别核验客户端和对应组件。' })}${field('Python 程序位置', 'runtime.python', { full: true, browse: 'exe', help: '选择已有环境的 python.exe，也可填写可用的 Python 命令。' })}</div></section>
+    ${wechatClientsCard()}<section class="card">${header('微信与读取程序', '选择本机已准备的程序。', '', 'chat')}<div class="form-grid">${field('匹配微信程序位置', 'hook.wechatExecutable', { full: true, browse: 'exe', help: '自动检测结果见上方版本卡。内置匹配版为 4.1.15.13 x64。版本卡会分别核验客户端和对应组件。' })}${field('Python 程序位置', 'runtime.python', { full: true, browse: 'exe', help: '选择已有环境的 python.exe，也可填写可用的 Python 命令。' })}</div>${toggle('遇到更新弹窗时自动取消并重开微信','hook.cancelUpdateAndRestart','默认关闭。发现更新时会提示手动取消。开启后，只操作当前配置的微信，确认取消按钮后尝试重开一次。')}</section>
     ${readerConfigurationCard()}
     <section class="card">${header('高级连接选项', '通常无需修改。端口需要互不重复。', '', 'sliders')}<details><summary>展开端口与发送超时设置</summary><div class="form-grid">${field('读取服务端口', 'ports.weflow', { type: 'number', min: 1024, max: 65535 })}${field('消息桥接端口', 'ports.onebot', { type: 'number', min: 1024, max: 65535 })}${field('适配器状态端口', 'ports.adapter', { type: 'number', min: 1024, max: 65535 })}${field('DSH 插件端口', 'ports.dshPlugin', { type: 'number', min: 1024, max: 65535 })}${field('发送后端地址', 'hook.baseUrl', { full: true, help: '必须为本机回环 HTTP 地址，例如 http://127.0.0.1:30001。' })}${field('发送请求超时 / 秒', 'hook.requestTimeoutMs', { type: 'number', transform: 'seconds', min: 1, max: 5, step: .1 })}${field('回执等待超时 / 秒', 'hook.receiptTimeoutMs', { type: 'number', transform: 'seconds', min: 1, max: 18, step: .1 })}${field('并发发送上限', 'hook.maxConcurrentSends', { type: 'number', min: 1, max: 4, step: 1 })}</div></details></section></div>`;
 }
@@ -472,7 +488,7 @@ async function logsPage() {
   state.logs = await api('/api/logs' + (state.logs?.file ? '?file=' + encodeURIComponent(state.logs.file) : ''));
   return `<section class="card">${header('本机运行日志', '显示所选文件最近 120 KB 的内容。')}<div class="log-toolbar"><select id="log-file" aria-label="日志文件">${state.logs.files.map(file => `<option ${file === state.logs.file ? 'selected' : ''}>${escapeHtml(file)}</option>`).join('')}</select><input id="log-filter" aria-label="过滤日志" placeholder="筛选关键词"><button class="button" id="export-log">${icon('download')}导出当前日志</button></div><pre class="log-view" id="log-view" tabindex="0">${escapeHtml(state.logs.content || '当前没有日志记录。')}</pre><div class="log-caption"><span>连接令牌与受保护凭据已隐藏</span><button class="link-button" id="reload-log">刷新日志</button></div></section>`;
 }
-let renderSequence = 0,renderedRoute=null,pageTransition=null;
+let renderSequence = 0,renderedRoute=null,pageTransition=null,disposeVideo;
 async function renderPage() {
   if (!state.config) return;
   const sequence = ++renderSequence; const page = state.page;
@@ -494,6 +510,7 @@ async function renderPage() {
     if (page === 'constellation') markup = constellationMarkup();
     if (page === 'voice') markup = '<div id="voice-page" class="music-page"></div>';
     if (page === 'music') markup = '<div id="music-page" class="music-page"></div>';
+    if (page === 'video') markup = '<div id="video-page" class="section-stack" aria-live="polite">正在读取视频插件设置…</div>';
     if (page === 'sending') markup = '<div class="section-stack">'+sendModeCard(state.draft.wechat.textTransport?.mode==='foreground'?'foreground':'native',header,state.draft.wechat.textTransport?.compatibilityMedia,state.draft.wechat.textTransport?.compatibilityStickers)+'</div>';
     if (page === 'setup') { if(!$('#page-body .setup-guide')||!state.guideCatalog){const checks=await Promise.allSettled([api('/api/reader-config'),api('/api/dsh-models')]);if(checks[0].status==='fulfilled')state.reader=checks[0].value;if(checks[1].status==='fulfilled')state.guideCatalog=checks[1].value;else state.guideCatalog={available:false,models:[]};}markup=setupPage(); }
 
@@ -506,6 +523,7 @@ async function renderPage() {
   if(sequence!==renderSequence)return;
   renderedRoute=targetRoute;
   disposeConstellation?.();disposeConstellation=undefined;
+  disposeVideo?.();disposeVideo=undefined;
   document.body.dataset.view=page;
   if(page==='setup')markup+=`<section class="card process-recovery-card">${header('端口与进程排查','遇到端口占用、其他微信实例或连接失败时，先检查正在运行的进程。','','tool')}<p class="card-description">检查不会停止程序。只有选中具体进程并再次确认后才会停止；随后可重新打开微信或 DSH，再重试配置。</p><button class="button" data-process-recovery>${icon('search')}检查端口与进程</button></section>`;
   const host=$('#page-body'),existingMain=host.querySelector('.setup-main');
@@ -530,6 +548,7 @@ async function renderPage() {
   if($('#wechat-clients'))void inspectWeChatClients();
   if(page==='music')mountMusicPage($('#music-page'),{api,esc:escapeHtml,toast,chats:['private','group'].flatMap(kind=>(state.config.wechat.whitelist[kind==='group'?'groups':'private']??[]).map(value=>{const key='wechat:'+kind+':'+value;return {key,name:state.names.get(key)??key};}))});
   if(page==='voice')mountVoiceStudioPage($('#voice-page'),{api,esc:escapeHtml,toast,chats:['private','group'].flatMap(kind=>(state.config.wechat.whitelist[kind==='group'?'groups':'private']??[]).map(value=>{const key='wechat:'+kind+':'+value;return {key,name:state.names.get(key)??key};}))});
+  if(page==='video')disposeVideo=extensionUI.mountVideo($('#video-page'));
   if(page==='setup'&&state.setupStep==='features')void mountFeatureSetup($('#feature-setup-list'),{api,project:state.draft,esc:escapeHtml});
   if(page==='settings'&&state.settingsSection==='connections'||page==='setup'&&state.setupStep==='model')void dshModels.mount();
   if(page==='setup')paintSetupGuide();
@@ -572,7 +591,7 @@ async function refreshStatus() {
 }
 async function saveAll() {
   if (state.savingAll || roleSaves.size) return;
-  const invalid = [...document.querySelectorAll('[data-path], [data-context-key]')].find(input => !input.checkValidity());
+  const invalid = [...document.querySelectorAll('[data-path], [data-context-key], [data-vision-compression]')].find(input => !input.checkValidity());
   if (invalid) { invalid.reportValidity(); return; }
   state.savingAll = true; updateDraftUI();
   try {
@@ -628,7 +647,13 @@ async function pollJob() {
       if (state.page==='setup'||state.page==='settings'&&state.settingsSection==='connections') await renderPage();
     }
     await refreshStatus();
-    if ($('#job-panel').hidden && state.job && !state.job.accountSwitched) toast((actions[state.job.action]?.[0] ?? '操作') + (state.job.state === 'succeeded' ? '已完成。' : '未完成，点击右上角操作记录查看原因。'));
+    if(state.job?.action==='wechat-open'&&state.job.state==='failed'){
+      const failed=state.job;
+      toast(failed.message||'微信未能打开，请查看操作详情。',{error:true,onDetails:()=>{
+        if(state.job?.id!==failed.id)return;
+        $('#job-panel').hidden=false;paintJob();
+      }});
+    }else if ($('#job-panel').hidden && state.job && !state.job.accountSwitched) toast((actions[state.job.action]?.[0] ?? '操作') + (state.job.state === 'succeeded' ? '已完成。' : '未完成，点击右上角操作记录查看原因。'));
     if (state.job?.state === 'succeeded' && state.page === 'chats') await renderPage();
   } catch (error) { showError('操作状态暂时无法获取：' + error.message + '。正在通过运行状态重新检查，请勿重复执行。'); }
   finally { jobPolling = false; paintReaderSetup(); }
@@ -655,7 +680,7 @@ async function openMatchingWeChat(button) {
       const result=await api('/api/config',{config,revision:state.revision});state.config=result.config;state.draft=structuredClone(result.config);state.revision=result.revision;updateDraftUI();
     }
     await runAction('wechat-open');
-  }catch(error){toast(error.message);}finally{if(button.isConnected)button.disabled=false;}
+  }catch(error){toast(error.message,{error:true});}finally{if(button.isConnected)button.disabled=false;}
 }
 async function runAction(action, conversationKey) {
   if (action === 'reader-connect') return saveReader(true);
@@ -667,7 +692,10 @@ async function runAction(action, conversationKey) {
     try {
       const body = { action, ...(conversationKey ? { conversationKey } : {}) };
       state.job = await api('/api/jobs', body); state.jobBody = body; $('#job-panel').hidden = false; paintJob(); pollJob();
-    } catch (error) { showError(error.message); }
+    } catch (error) {
+      if(action==='wechat-open')toast(error.message,{error:true});
+      else showError(error.message);
+    }
   };
   if (action === 'sessions-compact') return confirmAction('压缩这个聊天的上下文', '会调用当前模型生成摘要，可能消耗额度；会话仍保留，完成后继续在同一会话中聊天。', '开始压缩', run);
   if (['setup', 'hook-build', 'hook-pin', 'hook-unpin'].includes(action)) return confirmAction(actions[action][0], actions[action][1], actions[action][0], run);
@@ -780,6 +808,17 @@ document.addEventListener('change', event => {
   }
 });
 document.addEventListener('click', event => {
+  const discussion=event.target.closest('[data-qq-discussion]');
+  if(discussion){
+    discussion.closest('details').open=false;
+    modal('加入 QQ 群聊讨论','<p class="modal-description">在 QQ 搜索群号，申请加入 WeChatGirl 讨论群。</p><label class="field">群号<input id="discussion-group-number" value="2155085499" readonly></label><div class="modal-actions"><button class="button" type="button" data-close>关闭</button><button class="button primary" id="copy-discussion-group" type="button">复制群号</button></div>');
+    $('#copy-discussion-group').onclick=async()=>{
+      const number=$('#discussion-group-number');
+      try{await navigator.clipboard.writeText(number.value);$('#copy-discussion-group').textContent='已复制';}
+      catch{number.focus();number.select();}
+    };
+    return;
+  }
   const clientAction=event.target.closest('[data-wechat-client-refresh],[data-wechat-bundled-open],[data-wechat-compatible-open]');
   if(clientAction){if(clientAction.hasAttribute('data-wechat-client-refresh'))void inspectWeChatClients(true);else void openMatchingWeChat(clientAction);return;}
   const pluginRoute=event.target.closest('a[data-plugin-config-route]');if(pluginRoute){state.pluginReturnHash='#setup/features';return;}

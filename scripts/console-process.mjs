@@ -44,6 +44,11 @@ export function runConsoleCommand(spec, onOutput, { cwd, env = process.env, time
 }
 
 export function taskFailureMessage(output, code) {
+  if (/WECHAT_UPDATE_RESTART_REQUIRES_EXIT/.test(output)) return '已取消微信更新。微信仍在托盘运行，请从托盘完整退出匹配微信，再点“打开微信”。';
+  if (/WECHAT_UPDATE_CANCEL_UNAVAILABLE/.test(output)) return '发现微信更新弹窗，但无法确认取消按钮。请在微信选择“取消”或“暂不更新”后重试。';
+  if (/WECHAT_UPDATE_DIALOG_DETECTED/.test(output)) return /WECHAT_UPDATE_CANCELLED/.test(output)
+    ? '重开后微信再次弹出更新。请在微信选择“暂不更新”；若微信要求必须更新，当前匹配版本可能无法登录。'
+    : '发现微信更新弹窗。请在微信选择“取消”或“暂不更新”，然后重试。';
   const importError = /\[DSH_IMPORT_(?:RUNNING|UNSUPPORTED|BUNDLE_INVALID|FAILED)\] ([^\r\n]+)/.exec(output);
   if (importError) return importError[1];
   if (/DSH_NOT_CONFIGURED/.test(output)) return '请先在“首次配置”点击“下载安装 DSH”，安装后选择 DSH 程序位置并保存设置。';
@@ -61,7 +66,9 @@ export function taskFailureMessage(output, code) {
   if (/SERVICE_START_TIMEOUT/.test(output)) return portLabel+'对应的本实例服务未在期限内准备完成。请查看该服务日志，或重启本实例后重试。';
   if (/READER_PORT_UNAVAILABLE/.test(output)) return '读取服务端口已被占用或被 Windows 拒绝。请在连接设置中修改微信读取端口，再启动服务；端口可能被未监听的其他程序占用。';
   if (/port is used by another installation|port is already in use|EADDRINUSE|address already in use/i.test(output)) return '配置端口已被占用。点击“检查占用进程”，核对程序后可选择停止，再重试。';
-  if (/Another desktop WeChat is running|WECHAT_MULTIPLE/i.test(output)) return '检测到其他微信客户端。点击“检查占用进程”，确认并停止对应微信后，再打开匹配微信。';
+  if (/Another desktop WeChat is running|WECHAT_OTHER_CLIENT_RUNNING|WECHAT_MULTIPLE/i.test(output)) return '检测到其他微信实例。请从系统托盘退出对应的微信，再点“打开微信”；也可以点击“检查占用进程”核对。';
+  if (/WECHAT_STARTUP_TIMEOUT|WECHAT_CLIENT_PATH_UNAVAILABLE/.test(output)) return '微信还没有完成启动。若微信已显示登录窗口，请等它加载完成后重试；若没有窗口，请从托盘退出匹配微信后再打开。';
+  if (/WECHAT_LAUNCH_FAILED/.test(output)) return 'Windows 无法启动当前微信程序。请在“设置 → 微信与 DSH”重新检测，并使用已通过校验的内置匹配版。';
   if (/HOOK_CLIENT_UNHEALTHY|HOOK_INITIALIZATION_TIMEOUT|HOOK_NOT_LISTENING/.test(output)) return '微信发送组件尚未就绪。可稍后重试；持续失败时点击“修复微信连接”，核对进程并再次确认后重开匹配微信。详情见 hook-init.log。';
   if (/HOOK_AUTH_FAILED|HOOK_PORT_OWNER_MISMATCH/.test(output)) return '微信发送端口或令牌与当前客户端不一致。请检查占用进程和 hook-init.log；可通过“修复微信连接”重新打开匹配微信。';
   if (/HOOK_HEALTH_TIMEOUT/.test(output)) return '微信发送组件响应超时，请稍后重试；持续失败时查看 hook-init.log。';

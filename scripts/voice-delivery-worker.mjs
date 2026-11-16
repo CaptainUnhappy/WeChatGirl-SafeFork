@@ -7,6 +7,7 @@ import {voiceQueueRank} from '../packages/voice-studio/progress.mjs';
 import {voiceSendReadyAt} from '../packages/voice-studio/delivery-policy.mjs';
 import {readSendingMode} from '../packages/wechat-send-policy.mjs';
 import {validMention} from '../components/qq-bridge/src/core/group-mentions.js';
+import {suppressedGroupJob} from '../packages/plugin-api/group-mute.mjs';
 export async function verifyVoicePayload(root,job,{signal}={}){
   if(!/^[a-f0-9]{64}$/.test(job.id??''))return null;
   try{
@@ -35,6 +36,7 @@ export class VoiceDeliveryWorker{
     for(const [lane,job]of [['delivery',delivery],['generation',generation]]){if(!job||this.lanes.has(lane))continue;const controller=new AbortController();this.inflight.add(job.id);const task=(job.fallbackState==='queued'?this.sendFallback(job,controller.signal):this.run(job,controller.signal)).catch(error=>{if(this.store.cancelled(job))return;job.state=['submitting','submitted'].includes(job.state)?'unconfirmed':'failed';job.error=/^[A-Z][A-Z0-9_]{2,80}$/.test(error.code??error.message)?error.code??error.message:'VOICE_DELIVERY_FAILED';this.adapter.status.last_voice_error=job.error;this.save(job);}).finally(()=>{this.inflight.delete(job.id);this.lanes.delete(lane);});this.lanes.set(lane,{controller,task});}
   }
   async sendFallback(job,signal){
+    if(suppressedGroupJob(this.adapter.directory,job.key,job.createdAt)){job.fallbackState='cancelled';this.store.write(job);return;}
     if(!this.store.allowed(job)||this.store.cancelled(job)||signal.aborted){job.fallbackState='cancelled';this.store.write(job);return;}
     if(job.request.kind!=='speech'||job.fallbackText!==job.request.text||job.startedAt){job.fallbackState='cancelled';this.store.write(job);return;}
     job.fallbackDeadlineAt??=Date.now()+120000;if(Date.now()>job.fallbackDeadlineAt){job.fallbackState='failed';this.store.write(job);return;}
@@ -50,6 +52,7 @@ export class VoiceDeliveryWorker{
   }
   async run(job,signal){
     const adapter=this.adapter;
+    if(['queued','generating','prepared'].includes(job.state)&&suppressedGroupJob(adapter.directory,job.key,job.createdAt)){job.state='cancelled';job.error='GROUP_MUTED';this.save(job);return;}
     if(readSendingMode(adapter.directory)==='foreground'){job.state=['submitting','submitted'].includes(job.state)?'unconfirmed':'failed';job.error='VOICE_DISABLED_IN_FOREGROUND';this.save(job);return;}
     if(!this.store.allowed(job)){job.state=['submitting','submitted'].includes(job.state)?'unconfirmed':'cancelled';job.error='VOICE_ACCESS_CHANGED';this.save(job);return;}
     if(Date.now()>=job.deadlineAt){job.state=['submitting','submitted'].includes(job.state)?'unconfirmed':'expired';this.save(job);return;}
@@ -74,6 +77,7 @@ export class VoiceDeliveryWorker{
         const source=path.join(adapter.directory,'state/voice/outgoing',job.md5+'.silk');if(!/^[a-f0-9]{32}$/.test(job.md5??'')||fs.lstatSync(source).isSymbolicLink()||fs.statSync(source).size!==job.size||job.size>1024*1024||crypto.createHash('md5').update(fs.readFileSync(source)).digest('hex')!==job.md5)throw voiceError('VOICE_STAGED_INVALID');
         const rows=await adapter.messages(wxid),now=Date.now(),readyAt=voiceSendReadyAt(rows,now,this.store.settings(job));
         if(readyAt>now){job.retryAt=readyAt;job.waitReason='voice_rate_limit';this.store.write(job);return;}delete job.waitReason;delete job.retryAt;
+        if(suppressedGroupJob(adapter.directory,job.key,job.createdAt)){job.state='cancelled';job.error='GROUP_MUTED';this.save(job);return;}
         job.baseline=rows.map(rowKey);job.startedAt=now;job.account=identity.account;job.wxid=wxid;
         if(this.store.cancelled(job))return;if(!this.store.allowed(job)||signal.aborted)throw voiceError('VOICE_ACCESS_CHANGED');job.state='submitting';this.save(job);
         try{const response=await adapter.native('/SendVoiceMsg',{wxidorgid:wxid,path:source,md5:job.md5,size:job.size,duration_ms:job.durationMs},identity.account);if(response?.ret!==0)throw voiceError('VOICE_NATIVE_REJECTED');}

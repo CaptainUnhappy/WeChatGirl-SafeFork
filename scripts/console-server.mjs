@@ -40,7 +40,7 @@ import {hostCompatibility} from '../packages/plugin-api/contract.mjs';
 import {ForegroundSender} from './foreground-sender.mjs';
 import {createClientDetector} from './wechat-clients.mjs';
 import {compatibilityStickersEnabled} from '../packages/wechat-send-policy.mjs';
-import {createVideoConsole,VIDEO_INPUT_LIMIT} from './video-console.mjs';
+import {createVideoConsole,VIDEO_INPUT_LIMIT,videoVisionRequest} from './video-console.mjs';
 
 const readJson = file => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -74,6 +74,7 @@ const portOpen = port => new Promise(resolve => {
 export function validateConsoleConfig(config, root) {
   try { validateConfig(config); } catch (error) {
     const translations = [
+      [/WECHAT_UPDATE_OPTION_INVALID/, '请使用开关设置微信更新弹窗的自动处理。'],
       [/distinct|ports|Required ports/, '端口必须为 1024–65535 的整数，且不能互相重复。'],
       [/loopback/, '发送后端地址必须是本机回环 HTTP 地址。'],
       [/matching|version/, '发送组件需要匹配版本 4.1.10.27 的微信程序。'],
@@ -165,11 +166,10 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
     statusTime = 0;
   };
   const voiceComponents=createVoiceComponents({root,pickFile:()=>filePicker?filePicker('zip'):nativeHelper('zip'),python:()=>snapshot().config.runtime?.python??'python'});
-  const videoConsole=createVideoConsole({root,describe:async({b64,mime,video,selection,parser,signal})=>{
+  const videoConsole=createVideoConsole({root,describe:async({signal,...input})=>{
     const health=await plugin('/health',undefined,{signal});
     if(!health.pluginHostFeatures?.includes('video-workbench-v1'))throw fault('请从托盘完整退出并重开 DSH，让它加载视频识别接口。',409);
-    const config=snapshot().config.dsh;
-    return plugin('/vision-test',{b64,mime,video,mode:parser?'parser':'route',chatSelection:{provider:selection?.provider??config.provider,model:selection?.model??config.model},selection:parser??config.visionFallback?.selection??null,enabled:config.visionFallback?.enabled!==false},{signal});
+    return plugin('/vision-test',videoVisionRequest(input),{signal});
   }});
   const assertIdle = () => { if(shuttingDown)throw fault('正在退出并停止后台服务，请等待操作完成。',409);if(voiceComponents.busy)throw fault('语音组件正在选择或导入，请等待完成后再保存、重启或退出。',409);if (activeJob || protectingCredential || processRecoveryBusy) throw fault('有操作正在进行，请等它完成后再保存或执行其他操作。', 409); };
   function shutdown() {
@@ -737,8 +737,21 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
         if(previous.config.dsh.provider!==config.dsh.provider||previous.config.dsh.model!==config.dsh.model){const catalog=await plugin('/models');if(!catalog.models?.some(row=>row.provider===config.dsh.provider&&row.model===config.dsh.model))throw fault('请选择 DSH 列表中当前可用的模型。',409);}
         if (Object.values(config.ports).includes(boundPort) || Number(new URL(config.hook.baseUrl).port || 80) === boundPort) throw fault('服务端口不能与当前控制台端口重复。');
         backup(configFile); atomic(configFile, config);
-        const withoutStickers=value=>{const copy=structuredClone(value);delete copy.wechat.fishNotebook;delete copy.wechat.replyLayout;delete copy.wechat.stickers;delete copy.wechat.search;delete copy.wechat.webReader;delete copy.wechat.proactive;delete copy.wechat.context;delete copy.wechat.chatModes;delete copy.wechat.dshAccess;delete copy.wechat.memeLibrary;delete copy.wechat.assistant;if(copy.dsh){delete copy.dsh.provider;delete copy.dsh.model;delete copy.dsh.chats;}return copy;};
-        if(JSON.stringify(withoutStickers(previous.config))!==JSON.stringify(withoutStickers(config)))markPending(JSON.stringify(previous.config.dsh) !== JSON.stringify(config.dsh) || previous.config.ports.dshPlugin !== config.ports.dshPlugin);
+        const restartConfig=value=>{
+          const copy=structuredClone(value);
+          for(const key of ['fishNotebook','replyLayout','stickers','search','webReader','proactive','context','chatModes','dshAccess','memeLibrary','assistant'])delete copy.wechat[key];
+          if(copy.dsh){
+            for(const key of ['provider','model','chats'])delete copy.dsh[key];
+            const vision=copy.dsh.visionFallback;
+            if(vision){
+              delete vision.compression;
+              if(vision.enabled===true&&vision.selection==null)delete copy.dsh.visionFallback;
+            }
+          }
+          return copy;
+        };
+        const beforeRestart=restartConfig(previous.config),afterRestart=restartConfig(config);
+        if(JSON.stringify(beforeRestart)!==JSON.stringify(afterRestart))markPending(JSON.stringify(beforeRestart.dsh)!==JSON.stringify(afterRestart.dsh)||previous.config.ports.dshPlugin!==config.ports.dshPlugin);
         return reply(200, { ...snapshot(), ...optionalJson(preferenceFile) });
       }
       if(route==='/api/assistant-feedback')return reply(200,saveFeedback(root,body));

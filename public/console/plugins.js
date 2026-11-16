@@ -15,7 +15,7 @@ export function createPluginUI({api,modal,closeModal,confirmAction,escapeHtml:es
     const [catalog,preferences]=await Promise.all([api('/api/plugins'),api('/api/interface-preferences')]),items=catalog.plugins??[];
     const chats=['group','private'].flatMap(kind=>(state.config.wechat.whitelist[kind==='group'?'groups':'private']??[]).map(value=>({key:'wechat:'+kind+':'+value,kind,name:names('wechat:'+kind+':'+value)})));
     const selected=chats.find(chat=>chat.key===state.pluginChat)??chats[0];state.pluginChat=selected?.key;
-    const cards=preferences.categories.map(category=>{const members=items.filter(item=>pluginCategory(item.id,preferences)===category.id);if(!members.length)return '';return '<section class="plugin-category-group"><h3>'+esc(category.name)+' <small>'+members.length+'</small></h3>'+members.map(item=>{const missing=(item.requestedPermissions??[]).some(value=>!item.permissions.includes(value)),checked=!!selected&&(item.chats===null||item.chats?.includes(selected.key));return '<article class="plugin-assignment-row"><label class="plugin-assignment-toggle"><input type="checkbox" data-plugin-for-chat="'+esc(item.id)+'" '+(checked?'checked':'')+' '+(!selected||item.invalid||missing?'disabled':'')+'><span><strong>'+esc(item.name)+'</strong><small>'+esc(item.description??'')+'</small><small>'+(missing?'需要先授权插件权限':item.enabled?'插件已启用':'总开关关闭，勾选后启用')+'</small></span></label><button class="button small" data-plugin-settings="'+esc(item.id)+'">参数与群聊管理</button><label class="plugin-category-picker">分类<select data-plugin-category="'+esc(item.id)+'">'+preferences.categories.map(c=>'<option value="'+esc(c.id)+'" '+(c.id===category.id?'selected':'')+'>'+esc(c.name)+'</option>').join('')+'</select></label></article>';}).join('')+'</section>';}).join('');
+    const cards=preferences.categories.map(category=>{const members=items.filter(item=>(selected?.kind!=='private'||item.id!=='group-mute')&&pluginCategory(item.id,preferences)===category.id);if(!members.length)return '';return '<section class="plugin-category-group"><h3>'+esc(category.name)+' <small>'+members.length+'</small></h3>'+members.map(item=>{const missing=(item.requestedPermissions??[]).some(value=>!item.permissions.includes(value)),checked=!!selected&&(item.chats===null||item.chats?.includes(selected.key));return '<article class="plugin-assignment-row"><label class="plugin-assignment-toggle"><input type="checkbox" data-plugin-for-chat="'+esc(item.id)+'" '+(checked?'checked':'')+' '+(!selected||item.invalid||missing?'disabled':'')+'><span><strong>'+esc(item.name)+'</strong><small>'+esc(item.description??'')+'</small><small>'+(missing?'需要先授权插件权限':item.enabled?'插件已启用':'总开关关闭，勾选后启用')+'</small></span></label><button class="button small" data-plugin-settings="'+esc(item.id)+'">参数与群聊管理</button><label class="plugin-category-picker">分类<select data-plugin-category="'+esc(item.id)+'">'+preferences.categories.map(c=>'<option value="'+esc(c.id)+'" '+(c.id===category.id?'selected':'')+'>'+esc(c.name)+'</option>').join('')+'</select></label></article>';}).join('')+'</section>';}).join('');
     return '<section class="plugin-scope-intro"><div><h2>按聊天选择插件</h2><p>选择群聊或好友，在同一页勾选要使用的插件，修改后自动保存。</p></div><div class="actions"><button class="button" data-plugin-categories>管理分类</button><a class="button" href="#extensions/catalog">插件目录</a></div></section><section class="card"><div class="field"><label for="plugin-chat-picker">当前聊天</label><select id="plugin-chat-picker">'+chats.map(chat=>'<option value="'+esc(chat.key)+'" '+(chat.key===selected?.key?'selected':'')+'>'+esc((chat.kind==='group'?'群聊 · ':'好友 · ')+chat.name)+'</option>').join('')+'</select></div><p id="plugin-assignment-feedback" class="subtle" role="status"></p><div class="plugin-assignment-list">'+(cards||'<p>请先从能力目录安装插件。</p>')+'</div>'+(!chats.length?'<p class="notice">请先在聊天页面添加允许的群聊或好友。</p><a class="button" href="#chats">管理聊天</a>':'')+'</section>';
   }
   function bundleDialog(preview){modal('导入插件总包','<p class="modal-description">新插件保持关闭，不自动授予聊天权限。已安装插件全部跳过，保留你的设置和自定义代码；需要更新时请单独导入对应ZIP。</p><ul>'+preview.plugins.map(p=>'<li>'+esc(p.name)+' · '+esc(p.version)+(p.existing?' · 已安装，将跳过':' · 导入后关闭')+'</li>').join('')+'</ul><p data-bundle-error role="alert"></p><div class="modal-actions"><button class="button" data-close>取消</button><button class="button primary" data-bundle-confirm>确认导入全部新插件</button></div>');document.querySelector('[data-bundle-confirm]').onclick=async event=>{event.currentTarget.disabled=true;try{const result=await api('/api/plugins/bundle/install',{ticket:preview.ticket,revision:preview.revision,confirmed:true});closeModal();await renderPage();toast('已导入'+result.installed+'个，保留已有'+result.skipped+'个'+(result.failed?'，'+result.failed+'个失败，请重新检查':'')+'。');}catch(cause){document.querySelector('[data-bundle-error]').textContent=cause.message;event.target.disabled=false;}};}
@@ -56,7 +56,8 @@ export function createPluginUI({api,modal,closeModal,confirmAction,escapeHtml:es
   function videoMarkup(item,chats){
     const authorized=chats.filter(key=>item.chats===null||item.chats?.includes(key));
     return `<fieldset class="extension-fieldset" data-video-panel><legend>视频工作台</legend>
-      <p class="subtle">使用已保存的设置。支持 3 分钟、32 MB 以内的本地视频。识别会把抽帧拼图交给 DSH 的识图模型，可能消耗模型额度。</p>
+      <p class="subtle">授权群聊无需艾特。缓存缺失时，程序会尝试打开唯一可确认的视频，可能切换微信前台窗口。下载后自动识别、回复并核对微信服务器回执。等待缓存最长约 5 分钟。</p>
+      <p class="subtle">下方手动压缩与测试支持 32 MiB、3 分钟以内的视频。</p>
       <label class="field">应用聊天的模型与权限<select data-video-chat>${authorized.map(key=>`<option value="${esc(key)}">${esc(names(key))}</option>`).join('')}</select></label>
       <label class="field">选择视频<input type="file" accept=".mp4,.mov,.m4v,.webm,.mkv" data-video-file></label>
       <div class="button-row">
@@ -97,7 +98,10 @@ export function createPluginUI({api,modal,closeModal,confirmAction,escapeHtml:es
           result.textContent=`原文件 ${(value.sourceBytes/1048576).toFixed(2)} MB · 输出 ${(value.size/1048576).toFixed(2)} MB`;
         }else{
           status.textContent=`识别完成 · ${value.model.provider} / ${value.model.model} · 最多 ${value.frames} 帧`;
-          result.textContent=value.text;
+          const audio=value.audio;
+          const statusLabel={no_audio:'无音轨',missing_model:'本机 SenseVoice 未安装',no_speech:'未转写到清楚的对白',too_long:'超过本机单次整段转写的 5 分钟上限',failed:'整段音轨转写失败'}[audio?.status];
+          result.style.whiteSpace='pre-wrap';
+          result.textContent='画面抽样：'+value.text+(audio?.status==='ready'?'\n\n整段音轨转写：'+audio.text:statusLabel?'\n\n音轨：'+statusLabel:'');
         }
       }catch(error){if(panel.isConnected)status.textContent=controller.signal.aborted?'处理已取消。':error.name==='TimeoutError'?'处理超时，请缩短视频后重试。':error.message;}
       finally{controller=undefined;if(panel.isConnected)paint();}
@@ -132,17 +136,92 @@ export function createPluginUI({api,modal,closeModal,confirmAction,escapeHtml:es
     }
     search.oninput=paint;refresh.onclick=()=>void load();void load();
   }
+  function videoModelField(value){
+    return `<div class="field full"><label for="video-model">视频识别模型</label><input type="search" aria-label="搜索视频识别模型" placeholder="搜索提供方或模型" data-video-model-filter><select id="video-model" data-plugin-setting="visionModel"><option value="${esc(JSON.stringify(value||{}))}">${value?.model?esc(value.provider+' / '+value.model):'跟随聊天与图片分流'}</option></select><button class="button small" type="button" data-video-model-refresh>刷新 DSH 模型</button><small data-video-model-status role="status"></small><small>可指定独立的识图模型。跟随聊天时，支持图片的聊天模型直接读抽帧拼图，纯文本模型使用备用识图模型。</small></div>`;
+  }
+  function mountVideo(host){
+    const id='video-workbench';
+    const chats=['private','group'].flatMap(kind=>(state.config.wechat.whitelist[kind==='group'?'groups':'private']??[]).map(value=>'wechat:'+kind+':'+value));
+    let disposed=false,disposePanel;
+    const select=(key,label,choices,value,description)=>`<label class="field">${esc(label)}<select name="${key}">${choices.map(option=>`<option value="${option}" ${option===value?'selected':''}>${option}</option>`).join('')}</select><small>${esc(description)}</small></label>`;
+    async function load(){
+      try{
+        const catalog=await api('/api/plugins');
+        if(disposed||!host.isConnected)return;
+        const item=catalog.plugins.find(entry=>entry.id===id);
+        const intro=`<section class="card"><h2>微信里的视频怎么识别</h2><ol><li>启用插件，选择允许自动识别的好友和群聊。</li><li>授权群聊发视频后自动下载和识别，无需艾特。</li><li>DSH 分析各段的画面，本机 SenseVoice 单独识别整段音轨。音轨整段转写支持 5 分钟以内，超过时仍可识别画面。</li></ol></section>`;
+        if(!item||item.invalid){
+          host.innerHTML=intro+`<section class="card"><h2>${item?'插件需要修复':'安装视频插件'}</h2><p>${esc(item?.reason??'请在能力目录导入「视频压缩与识别」插件 ZIP，再返回这里启用。')}</p><a class="button" href="#extensions/catalog">前往能力目录</a></section>`;
+          return;
+        }
+        const {settings}=item;
+        host.innerHTML=intro+`<form class="section-stack" data-video-settings>
+          <section class="card"><h2>自动识别与聊天授权</h2><label class="extension-option"><input type="checkbox" name="enabled" ${item.enabled?'checked':''}>启用视频插件</label>
+          <label class="extension-option"><input type="checkbox" name="allChats" ${item.chats===null?'checked':''}>所有允许的聊天（含以后添加的聊天）</label>
+          <fieldset class="extension-fieldset" data-video-chat-scope><legend>选择好友与群聊</legend>
+          ${chats.map(key=>`<label class="extension-option"><input type="checkbox" name="chat" value="${esc(key)}" ${item.chats===null||item.chats?.includes(key)?'checked':''}>${key.includes(':group:')?'群聊':'好友'} · ${esc(names(key))}</label>`).join('')||'<p class="subtle">还没有可授权的聊天。</p><a class="button small" href="#chats">添加聊天</a>'}</fieldset></section>
+          <section class="card"><h2>识别模型与画面分段</h2><div class="form-grid">
+          ${videoModelField(settings.visionModel)}
+          <label class="field">画面识别分段数量<input type="number" name="sampleFrames" min="2" max="16" step="1" value="${esc(settings.sampleFrames??6)}" required><small>全片按时间等分，每段取一帧。默认 6 段。增加段数可以看到更多画面，也会延长处理时间。音轨独立识别。</small></label></div></section>
+          <section class="card"><h2>手动压缩设置</h2><div class="form-grid">
+          ${select('resolution','分辨率上限（像素）',[480,720,1080],settings.resolution??720,'按原画面比例缩小，保留首条音轨。')}
+          <label class="field">压缩强度（CRF）<input type="number" name="quality" min="20" max="34" step="1" value="${esc(settings.quality??26)}" required><small>数值越大，成品通常越小。默认 26。这两项只用于手动压缩。</small></label></div></section>
+          <div class="button-row"><button type="submit" class="button primary">保存视频设置</button><p class="subtle" data-video-save-status role="status"></p></div>
+          </form><section class="card"><h2>本地测试与压缩</h2><p class="subtle">使用已保存的配置。测试在本页显示结果，可能消耗 DSH 模型额度。</p>${videoMarkup(item,chats)}</section>`;
+        const form=host.querySelector('[data-video-settings]'),status=form.querySelector('[data-video-save-status]');
+        let revision=catalog.revision;
+        const scope=()=>{form.querySelector('[data-video-chat-scope]').disabled=form.elements.allChats.checked;};
+        function mountTools(){
+          disposePanel?.();
+          const panel=host.querySelector('[data-video-panel]');
+          const template=document.createElement('template');
+          template.innerHTML=videoMarkup(item,chats).trim();
+          panel.replaceWith(template.content.firstElementChild);
+          disposePanel=bindVideoPanel(host,item);
+        }
+        scope();form.elements.allChats.onchange=scope;
+        bindVideoModels(form);
+        disposePanel=bindVideoPanel(host,item);
+        form.onsubmit=async event=>{
+          event.preventDefault();
+          const button=event.submitter;
+          if(button.disabled)return;
+          button.disabled=true;status.textContent='正在保存…';
+          try{
+            const enabled=form.elements.enabled.checked;
+            const nextChats=form.elements.allChats.checked?null:[...form.querySelectorAll('[name="chat"]:checked')].map(input=>input.value);
+            const values={...item.settings,sampleFrames:Number(form.elements.sampleFrames.value),
+              resolution:Number(form.elements.resolution.value),quality:form.elements.quality.valueAsNumber,
+              visionModel:JSON.parse(form.querySelector('[data-plugin-setting="visionModel"]').value)};
+            const updated=await api('/api/plugins/'+id,{revision,enabled,permissions:item.permissions,chats:nextChats,settings:values});
+            if(disposed)return;
+            revision=updated.revision;
+            Object.assign(item,{enabled,chats:nextChats,settings:values});
+            mountTools();status.textContent='已保存，下一条视频按新设置处理。';
+          }catch(error){if(!disposed)status.textContent=error.message;}
+          finally{if(!disposed)button.disabled=false;}
+        };
+      }catch(error){
+        if(disposed||!host.isConnected)return;
+        host.innerHTML=`<section class="card"><p role="alert">${esc(error.message)}</p><button type="button" class="button">重新读取</button></section>`;
+        host.querySelector('button').onclick=()=>void load();
+      }
+    }
+    void load();
+    return ()=>{disposed=true;disposePanel?.();};
+  }
   async function settings(id){
+    if(id==='video-workbench'){location.hash='#video';return;}
     try{
       const catalog=await api('/api/plugins'),item=catalog.plugins.find(item=>item.id===id);if(!item)throw Error(BUILTIN_PLUGIN_PACKAGES.some(bundle=>bundle.id===id)?'该内置插件尚未安装，请先到能力目录安装，再返回配置。':'插件已变化，请刷新列表。');
-      const chats=['private','group'].flatMap(kind=>(state.config.wechat.whitelist[kind==='group'?'groups':'private']??[]).map(value=>'wechat:'+kind+':'+value));
-      const isSpeech=item.id==='speech-recognition',isVideo=item.id==='video-workbench';let speechBinding,disposeVideo;
+      const chats=(id==='group-mute'?['group']:['private','group']).flatMap(kind=>(state.config.wechat.whitelist[kind==='group'?'groups':'private']??[]).map(value=>'wechat:'+kind+':'+value));
+      const isSpeech=item.id==='speech-recognition';let speechBinding;
       const renderField=([key,schema],index)=>{
         const value=item.settings[key]??schema.default??'',field='plugin-setting-'+index,label=esc(schema.title??key),attr=`id="${field}" data-plugin-setting="${esc(key)}"`;
         if(['voice-studio','local-voice-model'].includes(item.id)&&key==='localModelPath')return `<div class="field"><label for="${field}">${label}</label><input ${attr} value="${esc(value)}" placeholder="留空使用内置模型"><small>${esc(schema.description??'')}</small>${window.desktop?.chooseVoiceModel?'<button type="button" class="button small" data-choose-voice-model>选择本地模型文件</button>':''}</div>`;
         if(isSpeech&&key==='model')return speechModelField({attr,field,label,value,esc});
         if(isSpeech&&key==='apiProtocol')return speechProtocolField({attr,field,schema,value,esc});
-        if(isVideo&&key==='visionModel')return `<div class="field full"><label for="${field}">视频识别模型</label><input type="search" aria-label="搜索视频识别模型" placeholder="搜索提供方或模型" data-video-model-filter><select ${attr}><option value="${esc(JSON.stringify(value||{}))}">${value?.model?esc(value.provider+' / '+value.model):'跟随聊天与图片分流'}</option></select><button class="button small" type="button" data-video-model-refresh>刷新 DSH 模型</button><small data-video-model-status role="status"></small></div>`;
+        if(id==='group-mute'&&key==='extraOperators')return `<div class="field"><label for="${field}">${label}</label><textarea ${attr} rows="3" spellcheck="false">${esc((Array.isArray(value)?value:[]).join('\n'))}</textarea><small>${esc(schema.description)}</small></div>`;
         if(schema.type==='boolean')return `<label class="extension-option"><input ${attr} type="checkbox" ${value?'checked':''}><span class="plugin-setting-copy">${label}${schema.description?`<small>${esc(schema.description)}</small>`:''}</span></label>`;
         if(schema.enum)return `<div class="field"><label for="${field}">${label}</label><select ${attr}>${schema.enum.map((option,n)=>`<option value="${n}" ${option===value?'selected':''}>${esc(({preview:"1分钟片段 · 最多60秒",full:"完整翻唱 · 每段最长55秒",breeze:"Breeze · 参考克隆",cosyvoice:"CosyVoice3 · 专用肥鱼引擎"})[option]??option)}</option>`).join('')}</select><small>${esc(schema.description??'')}</small></div>`;
         if(['object','array'].includes(schema.type))return `<div class="field"><label for="${field}">${label}（JSON）</label><textarea ${attr}>${esc(JSON.stringify(value,null,2))}</textarea></div>`;
@@ -152,12 +231,12 @@ export function createPluginUI({api,modal,closeModal,confirmAction,escapeHtml:es
       const rows=Object.entries(item.configSchema).map((entry,index)=>({key:entry[0],html:renderField(entry,index)}));
       const memoryGroups=[['自动记录与共享',['autoRemember','allowCrossChat','rememberNickname','rememberPreference','rememberPet','rememberProject','rememberActivity','rememberPlan']],['召回与近期上下文',['autoRecall','archiveRecall','recallLimit','recallPeopleLimit','contextBudget','recentMessages','recentChars','coldWakeMinutes']],['保留期限与后台摘要',['nicknameRetentionDays','factRetentionDays','planRetentionDays','maxNotesPerPerson','autoSummary','summaryTriggerRecords','summaryCooldownSeconds','allowEvaluation']]];
       const settingsMarkup=item.id==='people-memory'?memoryGroups.map(([title,keys],i)=>`<details class="speech-advanced" ${i===0?'open':''}><summary>${esc(title)}</summary><div class="form-grid">${rows.filter(row=>keys.includes(row.key)).map(row=>row.html).join('')}</div></details>`).join(''):isSpeech?'<div class="form-grid">'+rows.filter(row=>basic.has(row.key)).map(row=>row.html).join('')+'</div>'+speechDiagnosticsMarkup(item.serviceStatus,esc)+'<details class="speech-advanced"><summary>高级请求与模型列表设置</summary><div class="form-grid">'+rows.filter(row=>!basic.has(row.key)).map(row=>row.html).join('')+'</div></details>':'<div class="form-grid">'+rows.map(row=>row.html).join('')+'</div>';
-      modal(item.name,`<form id="plugin-settings-form"><p class="modal-description">${esc(item.description)}</p><p class="modal-description">${esc(item.reason)}。保存后在空闲时或下一轮聊天加载；首次使用 API v2 需重开 DSH。允许哪些聊天使用，请在插件与聊天页面单独选择。</p><label class="extension-option"><input id="plugin-enabled" type="checkbox" ${item.enabled?'checked':''} ${item.invalid?'disabled':''}>允许此插件运行（仅启用信任的代码）</label><fieldset class="extension-fieldset"><legend>授权能力</legend>${item.requestedPermissions.map(value=>`<label class="extension-option"><input name="plugin-permission" type="checkbox" value="${esc(value)}" ${item.permissions.includes(value)?'checked':''}>${esc(permissions[value])}</label>`).join('')||'<p class="subtle">不需要额外权限。</p>'}</fieldset><fieldset class="extension-fieldset"><legend>插件群聊与好友管理</legend>${chats.map(key=>`<label class="extension-option"><input name="plugin-chat" type="checkbox" value="${esc(key)}" ${item.chats===null||item.chats?.includes(key)?'checked':''}>${esc(names(key))}</label>`).join('')||'<p>请先添加允许的聊天。</p>'}</fieldset>${item.id==='memory-retrieval'?'<p class="notice plain">关键词检索需要「读取聊天历史」权限，并勾选允许检索的聊天。语义检索还需要嵌入权限和可用的本机模型服务。首次建立完整档案索引后再查询，或关闭完整档案检索以查询近期记录。</p>':''}${settingsMarkup}${isVideo?videoMarkup(item,chats):''}${item.id==='group-behavior'?'<section class="speech-advanced"><h3>虚构场景回放</h3><p class="subtle">不保存设置、不调用模型、不发送微信。</p><button type="button" class="button" data-group-replay>回放：点名 → 5秒后闲聊 → 再次点名</button><p data-group-replay-result role="status"></p></section>':''}<p class="inline-error" id="plugin-settings-error" role="alert"></p><div class="modal-actions"><button class="button" type="button" data-close>取消</button><button class="button primary" type="submit">保存插件设置</button></div></form>`,{onClose:()=>{speechBinding?.dispose();disposeVideo?.();}});
+      modal(item.name,`<form id="plugin-settings-form"><p class="modal-description">${esc(item.description)}</p><p class="modal-description">${esc(item.reason)}。${id==='group-mute'?'保存后立即生效。只在勾选的群聊响应静音命令。':'保存后在空闲时或下一轮聊天加载；首次使用 API v2 需重开 DSH。允许哪些聊天使用，请在插件与聊天页面单独选择。'}</p><label class="extension-option"><input id="plugin-enabled" type="checkbox" ${item.enabled?'checked':''} ${item.invalid?'disabled':''}>允许此插件运行（仅启用信任的代码）</label><fieldset class="extension-fieldset"><legend>授权能力</legend>${item.requestedPermissions.map(value=>`<label class="extension-option"><input name="plugin-permission" type="checkbox" value="${esc(value)}" ${item.permissions.includes(value)?'checked':''}>${esc(permissions[value])}</label>`).join('')||'<p class="subtle">不需要额外权限。</p>'}</fieldset><fieldset class="extension-fieldset"><legend>插件群聊与好友管理</legend>${chats.map(key=>`<label class="extension-option"><input name="plugin-chat" type="checkbox" value="${esc(key)}" ${item.chats===null||item.chats?.includes(key)?'checked':''}>${esc(names(key))}</label>`).join('')||'<p>请先添加允许的聊天。</p>'}</fieldset>${item.id==='memory-retrieval'?'<p class="notice plain">关键词检索需要「读取聊天历史」权限，并勾选允许检索的聊天。语义检索还需要嵌入权限和可用的本机模型服务。首次建立完整档案索引后再查询，或关闭完整档案检索以查询近期记录。</p>':''}${settingsMarkup}${item.id==='group-behavior'?'<section class="speech-advanced"><h3>虚构场景回放</h3><p class="subtle">不保存设置、不调用模型、不发送微信。</p><button type="button" class="button" data-group-replay>回放：点名 → 5秒后闲聊 → 再次点名</button><p data-group-replay-result role="status"></p></section>':''}<p class="inline-error" id="plugin-settings-error" role="alert"></p><div class="modal-actions"><button class="button" type="button" data-close>取消</button><button class="button primary" type="submit">保存插件设置</button></div></form>`,{onClose:()=>{speechBinding?.dispose();}});
       const form=document.querySelector('#plugin-settings-form');
       form.querySelector('[data-choose-voice-model]')?.addEventListener('click',async()=>{try{const chosen=await window.desktop.chooseVoiceModel();if(chosen)form.querySelector('[data-plugin-setting="localModelPath"]').value=chosen;}catch(error){form.querySelector('#plugin-settings-error').textContent=error.message;}});
-      const readValues=()=>{const values={...item.settings};for(const input of form.querySelectorAll('[data-plugin-setting]')){const schema=item.configSchema[input.dataset.pluginSetting];values[input.dataset.pluginSetting]=schema.enum?schema.enum[Number(input.value)]:schema.type==='boolean'?input.checked:['object','array'].includes(schema.type)?JSON.parse(input.value):['integer','number'].includes(schema.type)?Number(input.value):input.value;}return values;};
+      const readValues=()=>{const values={...item.settings};for(const input of form.querySelectorAll('[data-plugin-setting]')){const key=input.dataset.pluginSetting,schema=item.configSchema[key];values[key]=id==='group-mute'&&key==='extraOperators'?[...new Set(input.value.split(/\r?\n/).map(line=>line.trim()).filter(Boolean))]:schema.enum?schema.enum[Number(input.value)]:schema.type==='boolean'?input.checked:['object','array'].includes(schema.type)?JSON.parse(input.value):['integer','number'].includes(schema.type)?Number(input.value):input.value;}
+        if(id==='group-mute'&&(values.extraOperators.some(wxid=>!/^[A-Za-z0-9_-]{1,128}$/.test(wxid))||values.defaultMinutes>values.maxMinutes))throw Error('请每行填写一个真实微信 ID，并使默认时间不超过单次上限。');return values;};
       form.querySelector('[data-group-replay]')?.addEventListener('click',async event=>{const button=event.currentTarget;button.disabled=true;try{const result=await api('/api/group-behavior/replay',{settings:readValues()});form.querySelector('[data-group-replay-result]').textContent=result.results.map((row,index)=>['直接点名','5秒后闲聊','再次点名'][index]+'：'+(row.reply?'接话':'暂不接话')+'（'+({'direct-request':'直接请求','cooldown':'冷却中','ambient-sampling':'本轮随机旁听','ambient-allowed':'允许自然接话'}[row.reason]??row.reason)+'）').join('；');}catch(error){form.querySelector('[data-group-replay-result]').textContent=error.message;}finally{button.disabled=false;}});
-      if(isVideo){disposeVideo=bindVideoPanel(form,item);if(form.querySelector('[data-video-model-filter]'))bindVideoModels(form);}
       if(isSpeech)speechBinding=bindSpeechSettings({form,api:(route,body,options)=>api(route,body,true,options),item,revision:catalog.revision,readValues,esc});
       form.addEventListener('submit',async event=>{event.preventDefault();speechBinding?.cancel();const button=event.submitter??form.querySelector('[type="submit"]');button.disabled=true;
         try{
@@ -188,5 +267,5 @@ export function createPluginUI({api,modal,closeModal,confirmAction,escapeHtml:es
   document.addEventListener('dragover',event=>{if(event.dataTransfer?.types?.includes('Files')&&(document.querySelector('#plugin-install-entry')||document.querySelector('#plugin-dropzone'))){event.preventDefault();document.querySelector('#plugin-install-entry')?.classList.add('is-dragover');}});
   document.addEventListener('dragleave',event=>{if(!event.relatedTarget)document.querySelector('#plugin-install-entry')?.classList.remove('is-dragover');});
   document.addEventListener('drop',event=>{if(!document.querySelector('#plugin-install-entry')&&!document.querySelector('#plugin-dropzone'))return;event.preventDefault();document.querySelector('#plugin-install-entry')?.classList.remove('is-dragover');const files=event.dataTransfer?.files;if(files?.length!==1)return toast('一次拖入一个 ZIP 插件即可。');installDialog(files[0]);});
-  return {installMarkup,settings,installDialog,page};
+  return {installMarkup,settings,installDialog,page,mountVideo};
 }

@@ -1,10 +1,31 @@
+function Find-WeChatUpdateDialog([string]$Executable,[switch]$Cancel) {
+    try {
+        if (-not ('WeChatUpdateDialog' -as [type])) {
+            Add-Type -Path (Join-Path $PSScriptRoot 'wechat-update-dialog.cs') -ReferencedAssemblies UIAutomationClient,UIAutomationTypes,System.Core,WindowsBase
+        }
+        return [WeChatUpdateDialog]::Check($Executable,$Cancel.IsPresent)
+    } catch { return 0 }
+}
+
+function Test-HookClientUpdate([string]$Executable) {
+    if ((Find-WeChatUpdateDialog $Executable) -gt 0) { throw 'WECHAT_UPDATE_DIALOG_DETECTED' }
+}
+
+function Get-HookCoreProcess([string]$Executable,[string]$Core) {
+    foreach($entry in @(Get-CimInstance Win32_Process -Filter "Name='Weixin.exe'" | Where-Object {$_.ExecutablePath -eq $Executable -and $_.CommandLine -notmatch '--type=|--crashpad-handler'})){
+        try {
+            $client=Get-Process -Id ([int]$entry.ProcessId) -ErrorAction Stop
+            if(-not $client.HasExited -and $client.Path -eq $Executable -and @($client.Modules | Where-Object FileName -EQ $Core).Count){$client}
+        } catch {}
+    }
+}
+
 function Open-HookClient([string]$Executable,[string]$BaseUrl,[ValidateRange(0,120)][int]$TimeoutSeconds=35) {
     $Executable=[IO.Path]::GetFullPath($Executable)
     $uri=[Uri]$BaseUrl
     if($uri.Scheme -ne 'http' -or $uri.Host -ne '127.0.0.1' -or $uri.UserInfo -or $uri.AbsolutePath -ne '/' -or $uri.Query -or $uri.Fragment -or $uri.Port -lt 1024 -or $uri.Port -gt 65535){throw 'HOOK_LOOPBACK_REQUIRED'}
     $clients=@(Get-CimInstance Win32_Process -Filter "Name='Weixin.exe' OR Name='WeChat.exe'" | Where-Object {$_.CommandLine -notmatch '--type=|--crashpad-handler'})
     $matching=@($clients | Where-Object {$_.ExecutablePath -eq $Executable})
-    if($matching.Count -gt 1){throw 'WECHAT_MULTIPLE_MATCHING_CLIENTS'}
     if(@($clients | Where-Object {$_.ExecutablePath -and $_.ExecutablePath -ne $Executable}).Count){throw 'WECHAT_OTHER_CLIENT_RUNNING: Exit the other WeChat normally before opening the configured client.'}
     if(@($clients | Where-Object {-not $_.ExecutablePath}).Count){throw 'WECHAT_CLIENT_PATH_UNAVAILABLE: Existing WeChat process identity is not available; retry after startup finishes.'}
     if(-not $matching.Count){
@@ -14,25 +35,26 @@ function Open-HookClient([string]$Executable,[string]$BaseUrl,[ValidateRange(0,1
         catch{throw 'WECHAT_LAUNCH_FAILED: '+$_.Exception.Message}
     }
     $watch=[Diagnostics.Stopwatch]::StartNew()
+    $nextDialogCheck=0
+    $expectedCore=Join-Path (Split-Path -Parent $Executable) '4.1.15.13\Weixin.dll'
     do {
+        if($watch.ElapsedMilliseconds -ge $nextDialogCheck){
+            Test-HookClientUpdate $Executable
+            $nextDialogCheck=$watch.ElapsedMilliseconds+1000
+        }
         $clients=@(Get-CimInstance Win32_Process -Filter "Name='Weixin.exe' OR Name='WeChat.exe'" | Where-Object {$_.CommandLine -notmatch '--type=|--crashpad-handler'})
         if(@($clients | Where-Object {$_.ExecutablePath -and $_.ExecutablePath -ne $Executable}).Count){throw 'WECHAT_OTHER_CLIENT_RUNNING'}
         $unresolved=@($clients | Where-Object {-not $_.ExecutablePath})
-        $matching=@($clients | Where-Object {$_.ExecutablePath -eq $Executable})
-        if($matching.Count -eq 1 -and -not $unresolved.Count){
-            try{
-                $client=Get-Process -Id ([int]$matching[0].ProcessId) -ErrorAction Stop
-                $expectedCore=Join-Path (Split-Path -Parent $Executable) '4.1.15.13\Weixin.dll'
-                if(-not $client.HasExited -and $client.Path -eq $Executable -and @($client.Modules | Where-Object {$_.FileName -eq $expectedCore}).Count){
-                    Write-Output 'Matching WeChat core is loaded; preparing its sender...'
-                    return
-                }
-            }catch{}
+        $ready=@(Get-HookCoreProcess $Executable $expectedCore)
+        if($ready.Count -eq 1 -and -not $unresolved.Count){
+            Write-Output 'Matching WeChat core is loaded; preparing its sender...'
+            return
         }
         if($watch.Elapsed.TotalSeconds -ge $TimeoutSeconds){break}
         Start-Sleep -Milliseconds 200
     }while($watch.Elapsed.TotalSeconds -lt $TimeoutSeconds)
     if($unresolved.Count){throw 'WECHAT_CLIENT_PATH_UNAVAILABLE: WeChat process identity did not become available before the startup deadline.'}
+    if($ready.Count -gt 1){throw 'WECHAT_MULTIPLE_MATCHING_CLIENTS'}
     throw 'WECHAT_STARTUP_TIMEOUT: The configured WeChat did not finish loading its core.'
 }
 
@@ -40,8 +62,12 @@ function Open-HookClient([string]$Executable,[string]$BaseUrl,[ValidateRange(0,1
 function Wait-HookClient([string]$Executable,[string]$BaseUrl,[string]$ExpectedVersion,[string]$TokenFile,[int]$TimeoutSeconds=35) {
     $token=(Get-Content -LiteralPath $TokenFile -Raw -Encoding UTF8).Trim()
     if($token -notmatch '^[a-f0-9]{64}$'){throw 'HOOK_TOKEN_MISSING'}
-    $watch=[Diagnostics.Stopwatch]::StartNew();$missingSince=$null
+    $watch=[Diagnostics.Stopwatch]::StartNew();$missingSince=$null;$nextDialogCheck=0
     do {
+        if($watch.ElapsedMilliseconds -ge $nextDialogCheck){
+            Test-HookClientUpdate $Executable
+            $nextDialogCheck=$watch.ElapsedMilliseconds+1000
+        }
         $matching=@(Get-CimInstance Win32_Process -Filter "Name='Weixin.exe'" | Where-Object { $_.ExecutablePath -eq $Executable -and $_.CommandLine -notmatch '--type=|--crashpad-handler' })
         if(-not $matching.Count){
             if($null -eq $missingSince){$missingSince=$watch.ElapsedMilliseconds}

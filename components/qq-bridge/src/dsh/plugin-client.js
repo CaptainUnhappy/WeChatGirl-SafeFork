@@ -33,6 +33,14 @@ export class DshPluginClient {
 
   async modelSearchReady(){await this.searchReady();return this.modelSearchSupported===true;}
 
+  async describeVideo(input,{signal}){
+    const response=await fetch(this.url+'/vision-test',{method:'POST',headers:{authorization:'Bearer '+this.token,'content-type':'application/json'},
+      body:JSON.stringify(input),redirect:'error',signal});
+    const result=await response.json();
+    if(!response.ok||typeof result.text!=='string')throw Error('VIDEO_MODEL_UNAVAILABLE');
+    return result;
+  }
+
   async recognizeVoice(conversationKey,voice,senderWxid,{signal}={}){
     const response=await fetch(this.url+'/voice-input',{method:'POST',headers:{authorization:'Bearer '+this.token,'content-type':'application/json'},
       body:JSON.stringify({conversationKey,id:voice.id,senderWxid}),signal:AbortSignal.any([AbortSignal.timeout(34000),...(signal?[signal]:[])])});

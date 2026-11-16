@@ -9,6 +9,7 @@ try {
       $body=$line | ConvertFrom-Json
       [WhaleForeground]::Attempted=$false
       if($body.probe) { $ok=[WhaleForeground]::Probe($body.executable) }
+      elseif($body.openVideo){ $ok=[WhaleForeground]::OpenVideo($body.executable,$body.name,[int]$body.videoSeconds,[int[]]@($body.displaySeconds),[bool]$body.onlyVideo,[int]$body.previousClicks,[string[]]@($body.videoBefore),[string[]]@($body.videoAfter)) }
       elseif($body.favorite){ $ok=[WhaleForeground]::SendFavorite($body.executable,$body.name) }
       elseif($body.attachment){ $ok=[WhaleForeground]::SendAttachment($body.executable,$body.name,$body.attachment) }
       elseif($body.quote){ $ok=[WhaleForeground]::SendQuote($body.executable,$body.name,$body.text,$body.quote) }

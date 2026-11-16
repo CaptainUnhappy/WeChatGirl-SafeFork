@@ -17,6 +17,7 @@ public static class WhaleForeground {
   [DllImport("user32.dll")] static extern bool ShowWindowAsync(IntPtr hwnd,int command);
   [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr hwnd);
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd,IntPtr processId);
+  [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr hwnd);
   [DllImport("user32.dll")] static extern bool AttachThreadInput(uint thread,uint other,bool attach);
   [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
   [DllImport("user32.dll")] static extern bool SetCursorPos(int x,int y);
@@ -129,8 +130,9 @@ public static class WhaleForeground {
       }
       if(result==null)throw new Exception("FOREGROUND_SEARCH_EMPTY");
       if(!ClickInWindow(result,handle,false,true))throw new Exception("FOREGROUND_SEARCH_RESULT_UNCLICKABLE");
-      for(int attempt=0;attempt<20;attempt++) {
+      for(int attempt=0;attempt<40;attempt++) {
         if(GetForegroundWindow()!=handle)throw new Exception("FOREGROUND_FOCUS_CHANGED");
+        root=AutomationElement.FromHandle(handle);
         input=Find(root,"chat_input_field");
         if(input!=null&&input.Current.Name==name)break;
         Thread.Sleep(100);
@@ -215,6 +217,92 @@ public static class WhaleForeground {
   static bool HasQuote(AutomationElement root,string text){
     return Controls(root).Any(e=>Visible(e)&&e.Current.Name.StartsWith("引用 ",StringComparison.Ordinal)&&
       (text==null||e.Current.Name.EndsWith(" 的消息 : "+text,StringComparison.Ordinal)));
+  }
+  static readonly System.Text.RegularExpressions.Regex VideoLabel=new System.Text.RegularExpressions.Regex(
+    @"^\s*(?:\[视频\]|视频|\[Video\]|Video)(?:\s+(?<download>下载|Download))?(?:[\s:：]*(?<duration>(?:[0-9]{1,3}[:：])?[0-9]{1,3}[:：][0-9]{2}))?\s*$",
+    System.Text.RegularExpressions.RegexOptions.IgnoreCase|System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+  static readonly System.Text.RegularExpressions.Regex VideoClock=new System.Text.RegularExpressions.Regex(
+    @"^\s*(?:[0-9]{1,3}[:：])?[0-9]{1,3}[:：][0-9]{2}\s*$");
+  static int VideoSeconds(string duration){
+    if(String.IsNullOrEmpty(duration))return -1;
+    int seconds=0;
+    foreach(var part in duration.Split(':','：'))seconds=seconds*60+Int32.Parse(part,System.Globalization.CultureInfo.InvariantCulture);
+    return seconds;
+  }
+  static int DisplayedVideoSeconds(AutomationElement bubble,string labelDuration){
+    if(!String.IsNullOrEmpty(labelDuration))return VideoSeconds(labelDuration);
+    var clocks=Controls(bubble).Where(e=>!e.Current.IsOffscreen).Select(e=>e.Current.Name??"").Where(label=>VideoClock.IsMatch(label))
+      .Select(VideoSeconds).Distinct().ToArray();
+    return clocks.Length==1?clocks[0]:-1;
+  }
+  static bool ScrollVideoHistory(AutomationElement list,IntPtr handle){
+    if(list==null||!Visible(list)||GetForegroundWindow()!=handle)return false;
+    var area=list.Current.BoundingRectangle;
+    var point=new ScreenPoint { X=(int)(area.X+area.Width/2),Y=(int)(area.Y+area.Height/2) };
+    if(GetAncestor(WindowFromPoint(point),2)!=handle)return false;
+    var hit=AutomationElement.FromPoint(new System.Windows.Point(point.X,point.Y));
+    var walker=TreeWalker.RawViewWalker;
+    while(hit!=null&&!Automation.Compare(hit,list))hit=walker.GetParent(hit);
+    if(hit==null||!SetCursorPos(point.X,point.Y)||GetForegroundWindow()!=handle)return false;
+    mouse_event(0x0800,0,0,120,UIntPtr.Zero);
+    return true;
+  }
+  static bool ClickVideoThumbnail(AutomationElement bubble,AutomationElement list,IntPtr handle,int previousClicks){
+    var bounds=bubble.Current.BoundingRectangle;
+    var viewport=list.Current.BoundingRectangle;
+    double horizontalOffset=(96+previousClicks*24)*Math.Max(1,GetDpiForWindow(handle)/96.0);
+    var target=new ScreenPoint { X=(int)(bounds.Left+horizontalOffset),Y=(int)(bounds.Top+bounds.Height*0.57) };
+    if(!bounds.Contains(target.X,target.Y)||!viewport.Contains(target.X,target.Y)||GetForegroundWindow()!=handle||GetAncestor(WindowFromPoint(target),2)!=handle)return false;
+    var hit=AutomationElement.FromPoint(new System.Windows.Point(target.X,target.Y));
+    var walker=TreeWalker.RawViewWalker;
+    while(hit!=null&&!Automation.Compare(hit,bubble))hit=walker.GetParent(hit);
+    if(hit==null||!SetCursorPos(target.X,target.Y)||GetForegroundWindow()!=handle)return false;
+    mouse_event(2,0,0,0,UIntPtr.Zero);mouse_event(4,0,0,0,UIntPtr.Zero);
+    return true;
+  }
+  static string VideoMessagePattern(AutomationElement bubble,bool video){
+    if(video)return "v";
+    if(bubble.Current.ClassName!="mmui::ChatTextItemView")return null;
+    string text=System.Text.RegularExpressions.Regex.Replace(bubble.Current.Name??"",@"\s+"," ").Trim();
+    if(text.Length==0||text.Length>160)return null;
+    using(var hash=System.Security.Cryptography.SHA256.Create())
+      return "t:"+BitConverter.ToString(hash.ComputeHash(System.Text.Encoding.UTF8.GetBytes(text))).Replace("-","").ToLowerInvariant();
+  }
+  static bool MatchesVideoAnchor(string[] patterns,int start,string[] anchor){
+    if(anchor.Length==0||start<0||start+anchor.Length>patterns.Length)return false;
+    return anchor.SequenceEqual(patterns.Skip(start).Take(anchor.Length));
+  }
+  public static bool OpenVideo(string exe,string name,int seconds,int[] displaySeconds,bool onlyVideo,int previousClicks,string[] before,string[] after){
+    if(previousClicks<0||previousClicks>2)throw new Exception("FOREGROUND_VIDEO_TARGET_INVALID");
+    var root=OpenChat(exe,name);
+    var handle=new IntPtr(root.Current.NativeWindowHandle);
+    for(int attempt=0;attempt<8;attempt++){
+      root=AutomationElement.FromHandle(handle);
+      var input=Find(root,"chat_input_field");
+      if(input==null||input.Current.Name!=name||GetForegroundWindow()!=handle)throw new Exception("FOREGROUND_TARGET_CHANGED");
+      var list=Find(root,"chat_message_list");
+      var rows=(list==null?new AutomationElement[0]:Controls(list)).Where(e=>Visible(e)&&e.Current.AutomationId.EndsWith(".chat_bubble_item_view",StringComparison.Ordinal))
+        .OrderBy(e=>e.Current.BoundingRectangle.Top).Select(e=>new {Element=e,Label=VideoLabel.Match(e.Current.Name??"")}).ToArray();
+      var patterns=rows.Select(row=>VideoMessagePattern(row.Element,row.Label.Success)).ToArray();
+      var bubbles=rows.Where(e=>e.Label.Success).ToArray();
+      var matches=rows.Where((row,index)=>row.Label.Success&&
+        (MatchesVideoAnchor(patterns,index-before.Length,before)||MatchesVideoAnchor(patterns,index+1,after))).ToArray();
+      if(matches.Length==0)matches=bubbles.Where(e=>{
+        int displayed=DisplayedVideoSeconds(e.Element,e.Label.Groups["duration"].Value);
+        return displayed>=0&&seconds>0?displaySeconds.Contains(displayed):onlyVideo&&bubbles.Length==1;
+      }).ToArray();
+      if(matches.Length==1){
+        var match=matches[0];
+        if(previousClicks>0&&!match.Label.Groups["download"].Success)throw new Exception("FOREGROUND_VIDEO_DOWNLOAD_LABEL_GONE");
+        if(input.Current.Name!=name||!ClickVideoThumbnail(match.Element,list,handle,previousClicks))throw new Exception("FOREGROUND_VIDEO_TARGET_UNCLICKABLE");
+        return true;
+      }
+      if(matches.Length>1)break;
+      // New messages can push the target out of the recycler's visible rows.
+      if(attempt>=3&&(attempt==7||!ScrollVideoHistory(list,handle)))break;
+      Thread.Sleep(attempt>=3?300:150);
+    }
+    throw new Exception("FOREGROUND_VIDEO_TARGET_NOT_UNIQUE");
   }
   public static bool SendQuote(string exe,string name,string text,string original){
     if(String.IsNullOrEmpty(original)||original.Length>500||original.Contains("\n"))throw new Exception("FOREGROUND_QUOTE_INVALID");

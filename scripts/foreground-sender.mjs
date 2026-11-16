@@ -23,7 +23,7 @@ export class ForegroundSender {
   }
   fail(){this.pending?.reject(Error('FOREGROUND_PROCESS_STOPPED'));this.pending=null;this.child=null;}
   wait(){return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{this.pending=null;this.close();reject(Error('FOREGROUND_TIMEOUT'));},this.timeoutMs);this.pending={resolve:v=>{clearTimeout(timer);resolve(v);},reject:e=>{clearTimeout(timer);reject(e);}};});}
-  send(body,beforeSend=async()=>{}){const task=this.tail.then(async()=>{await this.start();await beforeSend();const result=this.wait();this.child.stdin.write(JSON.stringify(body)+'\n',error=>{if(error)this.fail();});return result;});this.tail=task.catch(()=>{});return task;}
+  send(body,beforeSend=async()=>{}){const task=this.tail.then(async()=>{await this.start();await beforeSend();const payload=typeof body==='function'?await body():body;const result=this.wait();this.child.stdin.write(JSON.stringify(payload)+'\n',error=>{if(error)this.fail();});return result;});this.tail=task.catch(()=>{});return task;}
   async probe(executable){try{return (await this.send({probe:true,executable})).accepted===true;}finally{this.close();}}
   close(){this.pending?.reject(Error('FOREGROUND_PROCESS_STOPPED'));this.pending=null;const child=this.child;this.child=null;if(child){child.stdin.end();child.kill();}this.lines?.close();}
 }

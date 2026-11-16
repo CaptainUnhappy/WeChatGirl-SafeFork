@@ -22,14 +22,15 @@ import concurrent.futures
 import urllib.request
 from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlsplit, urlunsplit
 import xml.etree.ElementTree as ET
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from wechat_files import FILE_TYPE, parse_file_message, FileCatalog
 from wechat_voice_input import VoiceCatalog, voice_info, load_voice_blob, audio_result
 from wechat_media import clean_account_wxid, image_cache_current
-from wechat_forwarded import FORWARD_TYPE, parse_forwarded_record
+from wechat_video import VIDEO_TYPE, VIDEO_TYPES, PACKED_COLUMNS, packed_video_tokens, video_identifiers, video_duration, video_open_selector, locate_local_video, locate_indexed_video, indexed_video_candidates
+from wechat_forwarded import FORWARD_TYPE, parse_forwarded_record, safe_xml
 from wechat_quote import QUOTE_TYPE, parse_quote_reply
 from wechat_sticker_send import sticker_send_fields, sticker_receipt_md5, APPMSG_STICKER_TYPE, native_gif_bytes, stage_sticker_resource, stage_current_sticker
 from wechat_sticker import emoji_attributes, resolve_sticker_bytes, sticker_image_xml, NoRedirect
@@ -40,6 +41,28 @@ from wechat_meme_library import import_library_sticker,inspect_library_sticker
 from wechat_group_bindings import GroupBindings, group_username
 
 PAT_TYPE = (62 << 32) | 49
+ARTICLE_CARD_TYPES = ((4 << 32) | 49, (5 << 32) | 49)
+
+
+def public_article_url(value):
+    if not isinstance(value, str) or len(value) > 100_000:
+        return None
+    try:
+        root = safe_xml(value)
+        app = root.find('appmsg') if root.tag == 'msg' else root if root.tag == 'appmsg' else None
+        if app is None or app.findtext('type', '').strip() not in ('4', '5'):
+            return None
+        raw_url = app.findtext('url', '').strip()
+        if not raw_url or len(raw_url) > 2048 or re.search(r'''[\s\\<>"'\x00-\x1f\x7f]''', raw_url):
+            return None
+        url = urlsplit(raw_url)
+        if url.scheme not in ('http', 'https') or url.netloc.lower() != 'mp.weixin.qq.com':
+            return None
+        if not (re.fullmatch(r'/s/[A-Za-z0-9_-]+', url.path) or url.path == '/s' and url.query):
+            return None
+        return urlunsplit(('https', 'mp.weixin.qq.com', url.path, url.query, ''))
+    except (ValueError, ET.ParseError, RecursionError):
+        return None
 
 
 def parse_pat(content, sender, own_wxid):
@@ -130,7 +153,12 @@ def push_payload(talker, message, names, own_wxid, identity=None):
     if message.get('isSend'):
         return None
     kind = message.get('localType')
-    if kind not in (1, 3, 34, 47, APPMSG_STICKER_TYPE, PAT_TYPE, 49, FORWARD_TYPE, QUOTE_TYPE, FILE_TYPE):
+    if kind in VIDEO_TYPES:
+        kind = VIDEO_TYPE
+    article_url = public_article_url(message.get('fullText', '')) if kind in (49, *ARTICLE_CARD_TYPES) else None
+    if article_url:
+        kind = 1
+    if kind not in (1, 3, 34, VIDEO_TYPE, 47, APPMSG_STICKER_TYPE, PAT_TYPE, 49, FORWARD_TYPE, QUOTE_TYPE, FILE_TYPE):
         return None
     pat = parse_pat(message.get('fullText', ''), sender, own_wxid) if kind == PAT_TYPE else None
     if kind == PAT_TYPE and not pat:
@@ -149,6 +177,10 @@ def push_payload(talker, message, names, own_wxid, identity=None):
     if kind in (49, APPMSG_STICKER_TYPE, FORWARD_TYPE, QUOTE_TYPE) and not sticker and file_info is None and forwarded is None and quote_reply is None:
         return None
     content = '[语音，尚未转写]' if voice else '[文件] ' + file_info['name'] if file_info else '[图片]' if kind == 3 else '[表情包：附件为静态画面或动画采样画面]' if sticker else '[拍一拍] 对方刚刚拍了拍你。' if pat else '[合并转发聊天记录] ' + forwarded['title'] if forwarded else (quote_reply['reply'] or '[引用回复，正文为空]') if quote_reply else message.get('fullText', message.get('content') or message.get('parsedContent', ''))
+    if article_url:
+        content = article_url
+    elif kind == VIDEO_TYPE:
+        content = '[视频]'
     if not content.strip():
         return None
     group = '@chatroom' in talker
@@ -208,6 +240,19 @@ class Reader:
         self.image_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
         self.files = FileCatalog(self.root, self.account, self.sticker_account_active)
         self.voices = VoiceCatalog(self.root, self.account, self.sticker_account_active)
+        self.videos = OrderedDict()
+        self.video_index_file = self.root / 'state' / 'video-input' / 'index.json'
+        if not metadata_readonly and self.video_index_file.is_file() and self.video_index_file.stat().st_size <= 2 * 1024 * 1024:
+            try:
+                saved = read_json(self.video_index_file)
+                if saved.get('account') == str(self.account.resolve()):
+                    now = time.time()
+                    for video_id, record in list(saved.get('entries', {}).items())[-500:]:
+                        if re.fullmatch(r'[a-f0-9]{64}', video_id) and isinstance(record, list) and len(record) == 4 and isinstance(record[3], (int, float)) and now < record[3]:
+                            self.videos[video_id] = record
+            except (TypeError, ValueError, OSError, AttributeError):
+                pass
+        self.video_slot = threading.BoundedSemaphore(1)
         self.voice_slots = threading.BoundedSemaphore(2)
         self.sticker_jobs = {}
         self.sticker_retry_at = {}
@@ -380,7 +425,7 @@ class Reader:
             # Preserve complete text: the upstream CLI display truncates to 200.
             table = 'Msg_' + hashlib.md5(talker.encode()).hexdigest()
             for message in data.get('messages', []):
-                if message.get('localType') not in (1, 3, 34, PAT_TYPE, 49, FORWARD_TYPE, QUOTE_TYPE, 47, APPMSG_STICKER_TYPE, FILE_TYPE):
+                if message.get('localType') not in (1, 3, 34, *VIDEO_TYPES, PAT_TYPE, 49, *ARTICLE_CARD_TYPES, FORWARD_TYPE, QUOTE_TYPE, 47, APPMSG_STICKER_TYPE, FILE_TYPE):
                     continue
                 for connection in connections:
                     if table not in nt.msg_tables(connection):
@@ -390,6 +435,22 @@ class Reader:
                         (message['localId'], message['createTime'], message['serverId'] or 0)).fetchone()
                     if row:
                         text = nt._decode_content(row[0])
+                        if message.get('localType') in VIDEO_TYPES:
+                            packed = None
+                            columns = {item[1].lower() for item in connection.execute('PRAGMA table_info("' + table + '")')}
+                            available = ['substr("' + name + '",1,8192)' for name in PACKED_COLUMNS if name.lower() in columns]
+                            if available:
+                                packed_row = connection.execute('SELECT ' + ','.join(available) + ' FROM "' + table +
+                                    '" WHERE local_id=? AND create_time=? AND server_id=? LIMIT 1',
+                                    (message['localId'], message['createTime'], message['serverId'] or 0)).fetchone()
+                                packed = next((value for value in packed_row or () if packed_video_tokens(value)), None)
+                            if '@chatroom' in talker and not message.get('senderUsername'):
+                                member = re.match(r'^([A-Za-z0-9_-]{5,128})[ \t]*[:：][ \t]*\r?\n\s*(?:<\?xml[^>]*>\s*)?<msg\b[^>]*>\s*<videomsg\b', text, re.I)
+                                if member:
+                                    message['senderUsername'] = member.group(1)
+                            message['videoIdentifiers'] = video_identifiers(text, packed)
+                            message['videoDuration'] = video_duration(text)
+                            break
                         if message.get('localType') == 3:
                             tag = re.search(r'<img\s+[^<>]{1,8192}>', text) if message.get('isSend') else None
                             md5 = re.search(r'''\smd5=["']([a-fA-F0-9]{32})["']''', tag.group()) if tag else None
@@ -426,6 +487,99 @@ class Reader:
         config = read_json(self.root / 'config' / 'wechatagent.json')
         kind = 'groups' if '@chatroom' in talker else 'private'
         return self.conversation_id(talker) in map(str, config['wechat']['whitelist'][kind])
+
+    def video_reference(self, video_id, key):
+        with self.lock:
+            record = self.videos.get(video_id)
+        if not self.sticker_account_active():
+            raise PermissionError('Video account changed')
+        if not record:
+            raise LookupError('VIDEO_REFERENCE_EXPIRED')
+        talker, identifiers, identity, expires = record
+        current = 'wechat:' + ('group:' if '@chatroom' in talker else 'private:') + self.conversation_id(talker)
+        if current != key or not self.image_talker_allowed(talker):
+            raise PermissionError('Video conversation mismatch')
+        if expires <= time.time():
+            raise LookupError('VIDEO_REFERENCE_EXPIRED')
+        return talker, identifiers, identity
+
+    def video_open_target(self, video_id, key):
+        talker, _, identity = self.video_reference(video_id, key)
+        rows = self.messages(talker, limit=100)
+        selector = video_open_selector(rows, identity)
+        return {'videoId': video_id, 'conversationKey': key, 'talker': talker, **selector}
+
+    def resolve_video(self, video_id, key):
+        talker, identifiers, identity = self.video_reference(video_id, key)
+        if not self.video_slot.acquire(blocking=False):
+            raise RuntimeError('VIDEO_READER_BUSY')
+        try:
+            try:
+                result = locate_local_video(self.account, *identifiers)
+            except FileNotFoundError:
+                packed, hashes = identifiers
+                tokens = tuple(dict.fromkeys((*packed, *self.video_resource_tokens(*identity))))
+                try:
+                    result = locate_local_video(self.account, tokens, hashes)
+                except FileNotFoundError:
+                    result = self.indexed_video(tuple(dict.fromkeys((*hashes, *tokens))))
+            if not self.sticker_account_active() or not self.image_talker_allowed(talker):
+                raise PermissionError('Video permission changed')
+            return {'videoId': video_id, 'conversationKey': key, 'localPath': str(result)}
+        finally:
+            self.video_slot.release()
+
+    def remember_video(self, video_id, talker, identifiers, identity):
+        now = time.time()
+        with self.lock:
+            self.videos = OrderedDict((key, value) for key, value in self.videos.items() if value[3] > now)
+            self.videos[video_id] = (talker, identifiers, identity, now + 1800)
+            while len(self.videos) > 500:
+                self.videos.popitem(last=False)
+            try:
+                self.video_index_file.parent.mkdir(parents=True, exist_ok=True)
+                temporary = self.video_index_file.with_suffix('.tmp')
+                temporary.write_text(json.dumps({'account': str(self.account.resolve()), 'entries': self.videos}), encoding='utf-8')
+                temporary.replace(self.video_index_file)
+            except OSError:
+                print('VIDEO_INDEX_SAVE_FAILED', flush=True)
+
+    def video_resource_tokens(self, server_id, local_id, timestamp):
+        database = self.account / 'db_storage' / 'message' / 'message_resource.db'
+        if not server_id or not database.is_file():
+            return ()
+        connection = None
+        try:
+            key, salt = nt.derive_database_key(str(database), '', '', self.passphrase)
+            connection, cursor = nt.connect_nt_db(str(database), key, salt)
+            cursor.execute('PRAGMA query_only=ON')
+            rows = cursor.execute('SELECT substr(packed_info,1,8192) FROM MessageResourceInfo '
+                                  'WHERE message_svr_id=? AND message_local_id=? AND message_create_time=? LIMIT 8',
+                                  (int(server_id), local_id, timestamp))
+            return tuple(dict.fromkeys(token for (packed,) in rows for token in packed_video_tokens(packed)))
+        except Exception:
+            # Optional resource tables differ between WeChat builds.
+            return ()
+        finally:
+            if connection is not None:
+                connection.close()
+
+    def indexed_video(self, tokens):
+        account = self.account.resolve()
+        database = self.account / 'db_storage' / 'hardlink' / 'hardlink.db'
+        if not tokens or not database.is_file() or database.resolve() != account / 'db_storage' / 'hardlink' / 'hardlink.db':
+            raise FileNotFoundError('VIDEO_LOCAL_MISSING')
+        connection = None
+        try:
+            key, salt = nt.derive_database_key(str(database), '', '', self.passphrase)
+            connection, cursor = nt.connect_nt_db(str(database), key, salt)
+            cursor.execute('PRAGMA query_only=ON')
+            return locate_indexed_video(self.account, indexed_video_candidates(cursor, tokens))
+        except Exception:
+            raise FileNotFoundError('VIDEO_LOCAL_MISSING') from None
+        finally:
+            if connection is not None:
+                connection.close()
 
     def resolve_voice(self, voice_id, key, plugin_id, format='wav'):
         if format not in ('wav', 'silk'):
@@ -535,12 +689,19 @@ class Reader:
         descriptor = self.image_index.get(image_id)
         if not descriptor or descriptor.get('account') != self.account.name or not self.image_talker_allowed(descriptor['talker']):
             raise PermissionError('Image is unavailable or not authorized')
+        compression = None
+        if descriptor.get('localType', 3) == 3:
+            from wechat_image_normalize import image_compression
+            dsh = read_json(self.root / 'config' / 'wechatagent.json').get('dsh', {})
+            compression = image_compression((dsh.get('visionFallback') or {}).get('compression'))
+            descriptor = {**descriptor, 'compression': compression}
+        job_key = (image_id, tuple(compression.values()) if compression else None)
         cache = self.image_dir / (image_id + '.json')
         if cache.is_file():
             try:
                 cached = read_json(cache)
-                if descriptor.get('localType', 3) != 3 or image_cache_current(self.account, descriptor['talker'], cached):
-                    return {key: value for key, value in cached.items() if key != '_imageSource'}
+                if compression is None or cached.get('_compression') == compression and image_cache_current(self.account, descriptor['talker'], cached):
+                    return {key: value for key, value in cached.items() if key not in ('_imageSource', '_compression')}
             except (ValueError, TypeError, OSError):
                 pass  # Rebuild stale or incomplete previews from this message.
         def run():
@@ -565,13 +726,14 @@ class Reader:
                 raise RuntimeError('IMAGE_RESOLUTION_EMPTY')
             result['imageId'] = image_id
             result['conversationKey'] = 'wechat:' + ('group:' if '@chatroom' in descriptor['talker'] else 'private:') + self.conversation_id(descriptor['talker'])
-            temp = cache.with_suffix('.tmp')
+            result['_compression'] = compression
+            temp = cache.with_suffix('.' + uuid.uuid4().hex + '.tmp')
             temp.write_text(json.dumps(result), encoding='utf-8')
             temp.replace(cache)
             self.image_error = ''
-            return {key: value for key, value in result.items() if key != '_imageSource'}
+            return {key: value for key, value in result.items() if key not in ('_imageSource', '_compression')}
         with self.lock:
-            future = self.image_jobs.get(image_id)
+            future = self.image_jobs.get(job_key)
             if future is None or future.cancelled() or future.done() and future.exception() is not None:
                 # Bound queued work as well as executing subprocesses. A lost
                 # HTTP client cannot leave a 65-second job blocking new images.
@@ -579,11 +741,11 @@ class Reader:
                     raise RuntimeError('IMAGE_PROCESS_BUSY')
                 deadline = time.monotonic() + 11
                 future = self.image_executor.submit(run)
-                self.image_jobs[image_id] = future
+                self.image_jobs[job_key] = future
         def finished(done):
             with self.lock:
-                if self.image_jobs.get(image_id) is done:
-                    self.image_jobs.pop(image_id, None)
+                if self.image_jobs.get(job_key) is done:
+                    self.image_jobs.pop(job_key, None)
         future.add_done_callback(finished)
         try:
             return future.result(timeout=11.5)
@@ -819,7 +981,7 @@ class Reader:
             print('Sticker pool full; DS selection pending, current pool retained.',flush=True)
 
     def poll(self):
-        since = self.started_at
+        since_by_talker = {}
         # Migrate only already observed sticker descriptors; do not replay old messages.
         for image_id,descriptor in list(self.image_index.items()):
             if descriptor.get('localType')==47:
@@ -828,10 +990,10 @@ class Reader:
         while not self.stop.is_set():
             try:
                 self.refresh_names(max_age=30)
-                newest = since
                 for talker in self.selected_talkers():
-                    # No historical replay on startup; retain a small overlap.
-                    messages = self.messages(talker, limit=0, from_time=max(self.started_at, since - 3))
+                    # Another chat can advance while a video is still being registered here.
+                    newest = since_by_talker.get(talker, self.started_at)
+                    messages = self.messages(talker, limit=0, from_time=max(self.started_at, newest - 15))
                     for message in reversed(messages):
                         newest = max(newest, message.get('createTime', 0))
                         payload = self.make_payload(talker, message)
@@ -847,6 +1009,11 @@ class Reader:
                             if not reference:
                                 continue
                             payload['voice'] = reference
+                        if payload['type'] == VIDEO_TYPE:
+                            video_id = payload['rawid']
+                            identity = (message.get('serverId'), message.get('localId'), message.get('createTime'))
+                            self.remember_video(video_id, talker, message.get('videoIdentifiers', ((), ())), identity)
+                            payload['video'] = {'id': video_id}
                         if payload['type'] in (3, 47):
                             image_id = self.register_image(talker, payload)
                             if not image_id:
@@ -862,8 +1029,9 @@ class Reader:
                                 except queue.Full:
                                     self.clients.discard(client)
                         self.pushed += 1
-                        print('Reader incoming ' + ('sticker' if payload['type'] == 47 else 'image' if payload['type'] == 3 else 'pat' if payload['type'] == PAT_TYPE else 'text') + '; OneBot conversation=' + self.conversation_id(talker), flush=True)
-                since = newest
+                        label = {VIDEO_TYPE: 'video', 47: 'sticker', 3: 'image', PAT_TYPE: 'pat'}.get(payload['type'], 'text')
+                        print('Reader incoming ' + label + '; OneBot conversation=' + self.conversation_id(talker), flush=True)
+                    since_by_talker[talker] = newest
                 self.pump_sticker_collection()
                 self.pump_sticker_pool_review()
                 self.last_poll = time.time()
@@ -1009,6 +1177,21 @@ def serve(reader, port, token):
                     self.respond(reader.files.resolve(url.path.rsplit('/', 1)[1], query.get('conversationKey', [''])[0], query.get('senderWxid', [''])[0]))
                 elif re.fullmatch(r'/api/v1/voices/[a-f0-9]{64}', url.path):
                     self.respond(reader.resolve_voice(url.path.rsplit('/', 1)[1], query.get('conversationKey', [''])[0], query.get('pluginId', [''])[0], query.get('format', ['wav'])[0]))
+                elif re.fullmatch(r'/api/v1/videos/[a-f0-9]{64}(?:/open-target)?', url.path):
+                    try:
+                        video_id = url.path.split('/')[4]
+                        key = query.get('conversationKey', [''])[0]
+                        result = reader.video_open_target(video_id, key) if url.path.endswith('/open-target') else reader.resolve_video(video_id, key)
+                        self.respond(result)
+                    except FileNotFoundError:
+                        self.respond({'error': 'VIDEO_LOCAL_MISSING'}, 404)
+                    except LookupError as error:
+                        code = str(error)
+                        self.respond({'error': code}, 409 if code == 'VIDEO_TARGET_NOT_UNIQUE' else 410)
+                    except RuntimeError as error:
+                        if str(error) != 'VIDEO_READER_BUSY':
+                            raise
+                        self.respond({'error': 'VIDEO_READER_BUSY'}, 429)
                 elif re.fullmatch(r'/api/v1/images/[a-f0-9]{64}', url.path):
                     self.respond(reader.resolve_image(url.path.rsplit('/', 1)[1]))
                 elif re.fullmatch(r'/api/v1/stickers/pool-review/[a-f0-9]{64}',url.path):

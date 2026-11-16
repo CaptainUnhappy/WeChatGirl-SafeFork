@@ -9,7 +9,7 @@ import path from 'node:path';
 import { WechatOneBotAdapter } from './adapters/wechat/wechat-onebot-adapter.js';
 import { MessageBuffer } from './core/message-buffer.js';
 import {DshConnectionGuard} from './core/dsh-connection.js';
-import { SocialEngine,assistantChatRequest } from './core/social-engine.js';
+import { SocialEngine,assistantChatRequest,parseSocialDecision } from './core/social-engine.js';
 import { DshPluginClient } from './dsh/plugin-client.js';
 import { buildConversationKey } from './core/conversation-key.js';
 import { selectRoleText } from './role-card.js';
@@ -21,9 +21,11 @@ import { ContextMaintenance } from './core/context-maintenance.js';
 import {HistoryStore} from '../../../packages/dsh-social-bridge-plugin/history-store.mjs';
 import {scopeHistory} from '../../../packages/dsh-social-bridge-plugin/work-modes.mjs';
 import {activeReaderAccount} from '../../../scripts/reader-account-state.mjs';
+import {createIncomingVideo} from '../../../scripts/incoming-video.mjs';
 import {createHash} from 'node:crypto';
 import {PeopleMemory,peopleObservations} from '../../../packages/plugin-api/people-memory.mjs';
 import {memoryPluginPolicy} from '../../../packages/plugin-api/memory-policy.mjs';
+import {GroupMute} from '../../../packages/plugin-api/group-mute.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const configPath = path.resolve(process.argv[2] ?? path.join(root, 'config.social.json'));
@@ -79,7 +81,12 @@ const personaFor = (key) => socialPersona(config, key, (roleName) => {
   return selectRoleText(fs.readFileSync(path.join(root, 'roles', `${roleName}.md`), 'utf8'), 'v2');
 });
 const connection=new DshConnectionGuard({buffer,probe:()=>plugin.connectionHealth({projectRoot:historyRoot,accountScope:historyAccount.id}),log});
+const recognizeVideo=createIncomingVideo({root:historyRoot,describe:(input,options)=>plugin.describeVideo(input,options),
+  requestDownload:(key,id,previousClicks)=>{const [,kind,target]=key.split(':');return adapter.openReceivedVideo(kind,target,id,previousClicks);},
+  isCurrentAccount:()=>!!historyAccount.id&&activeReaderAccount(historyRoot).id===historyAccount.id,log});
+const videoAccess=key=>pluginEnabled(historyRoot,'video-workbench',key)?pluginConfiguration(historyRoot).revision:null;
 const engine = new SocialEngine({ buffer,connection, roleFor: key => personaFor(key).persona,
+  recognizeVideo,videoAccess,muteStateFor:key=>groupMute.state(key),
   personaNameFor: key => personaFor(key).personaName,workModeFor,chatDshAccess,assistantControl:(key,action,message,command)=>plugin.assistantTask(key,action,{...command,senderWxid:verifiedAssistantSender(message)}),assistantAccess:(key,message)=>assistantSenderAllowed(liveWechat(),key,verifiedAssistantSender(message)),
   wakeWords: wechat.wake_words ?? [],
   mode: wechat.wake_mode ?? 'hybrid',modeFor, batchMs: config.social?.batch_ms ?? 3000,
@@ -108,6 +115,27 @@ const memberArchive={backfill:(...args)=>memberHistory.backfill(...args),append:
 const memberBuffer=new MessageBuffer(path.join(historyRoot,'state/accounts',historyAccount.id||historyAccount.legacyId||'legacy','assistant-group-chat.json'),{maxPerChat:buffer.maxPerChat,archive:memberArchive});
 const memberConnection=new DshConnectionGuard({buffer:memberBuffer,probe:()=>plugin.connectionHealth({projectRoot:historyRoot,accountScope:historyAccount.id}),log});
 const memberEngine=engine.createGroupChat({buffer:memberBuffer,connection:memberConnection,assistantAccess:(key,message)=>conversationWorkMode(memberSettings(),key)==='assistant'&&assistantGroupChatAllowed(memberSettings(),key,verifiedAssistantSender(message))});
+const groupMute=new GroupMute({root:historyRoot,account:historyAccount.id,settingsFor:liveWechat,
+  isReady:()=>connection.ready&&adapter.stats.connected&&!!adapter.selfId,log,
+  onMute:key=>{engine.muteChat(key);memberEngine.muteChat(key);},
+  generate:async(key,id)=>{
+    const {persona,personaName}=personaFor(key),workMode=workModeFor(key);
+    const output=await plugin.followup(key,'本机事件：这个群的静音刚刚结束。以当前人格自然说一句简短的恢复发言提示，不补回此前消息，不调用工具或发媒体。只输出 RESPOND: 后接一句文字。',{
+      persona,personaName,workMode,assistantChatOnly:workMode==='assistant',searchOptOut:true,memeLibraryDisabled:true,replyMaxMessages:1,
+      batchId:createHash('sha256').update(id+'\0group-mute-generate').digest('hex'),groupEngagement:{kind:'group',mode:workMode,direct:true,verified:true},
+    });
+    const result=parseSocialDecision(output,{}, {allowTextParts:false,maxChars:120});
+    return result.decision==='RESPOND'&&result.text?result.text:'我回来啦，继续聊吧。';
+  },
+  send:async(key,text,deliveryId)=>{
+    const target=key.split(':').at(-1);
+    const receipt=await adapter.sendText({kind:'group',target,text,deliveryId});
+    const timestamp=Date.now();
+    buffer.append({platform:'wechat',kind:'group',conversation_id:target,sender_id:adapter.selfId,self_id:adapter.selfId,text,timestamp:timestamp/1000,work_mode:workModeFor(key),delivery_status:receipt.delivered==='database-confirmed'?'confirmed':'unconfirmed'},{outgoing:true});
+    engine.noteOutgoing(key,timestamp);
+    return receipt;
+  },
+});
 const proactive=new ProactiveEngine({stateFile:path.resolve(config.proactive_state_file??path.join(root,'state/proactive/state.json')),
   buffer,social:engine,settingsFor:()=>config.proactive_policy_file?JSON.parse(fs.readFileSync(config.proactive_policy_file,'utf8').replace(/^\uFEFF/,'')):{wechat},
   personaFor,decide:(key,prompt,metadata)=>plugin.followup(key,prompt,metadata),
@@ -124,10 +152,18 @@ const voiceIngress=new VoiceIngress({
   generationFor:()=>pluginConfiguration(historyRoot).config.plugins['speech-recognition']?.generation??'',
   onResult:(_message,result,generation)=>writeVoiceAttempt(historyRoot,result,generation),
   recognize:(message,options)=>plugin.recognizeVoice(buildConversationKey(message.platform,message.kind,message.conversation_id),message.voice,verifiedAssistantSender(message),options),
-  canRecognize:async message=>{const key=buildConversationKey(message.platform,message.kind,message.conversation_id);return activeReaderAccount(historyRoot).id===historyAccount.id&&pluginEnabled(historyRoot,'speech-recognition',key)&&await connection.check({force:true})&&!connection.skips(message)&&(engine.workModeFor(key)!=='assistant'||engine.assistantAllowed(key,message));},
+  canRecognize:async message=>{const key=buildConversationKey(message.platform,message.kind,message.conversation_id);return !engine.muted(key)&&activeReaderAccount(historyRoot).id===historyAccount.id&&pluginEnabled(historyRoot,'speech-recognition',key)&&await connection.check({force:true})&&!connection.skips(message)&&(engine.workModeFor(key)!=='assistant'||engine.assistantAllowed(key,message));},
   deliver:routeIncoming,log,
 });
-adapter.onMessage(message=>{void voiceIngress.push(message).catch(()=>log('[Voice] inbound_failed'));});
+adapter.onMessage(message=>{
+  try{
+    message={...message,ingressedAt:Date.now()};
+    const key=buildConversationKey(message.platform,message.kind,message.conversation_id);
+    if(groupMute.handle(key,message)){void groupMute.tick().catch(()=>log('[GroupMute] resume_unavailable'));return;}
+    const delivery=engine.muted(key)?routeIncoming(message):voiceIngress.push(message);
+    void delivery.catch(()=>log('[Voice] inbound_failed'));
+  }catch{log('[GroupMute] inbound_unavailable');}
+});
 async function routeIncoming(message) {
   try {
     const list = message.kind === 'group' ? allowedGroups : allowedPrivate;
@@ -164,8 +200,9 @@ const replayTimer = setInterval(() => {
 }, 30000);
 const noticeDelivery=createAssistantNoticeDelivery({adapter,plugin,settingsFor:()=>config.search_policy_file?JSON.parse(fs.readFileSync(config.search_policy_file,'utf8').replace(/^\uFEFF/,'' )).wechat:wechat,isReady:()=>connection.ready,log});
 const assistantNoticeTimer=setInterval(()=>void noticeDelivery.tick(),5000);
+const muteTimer=setInterval(()=>void groupMute.tick().catch(()=>log('[GroupMute] resume_unavailable')),1000);
 const proactiveTimer=setInterval(()=>void proactive.tick(),60000);void proactive.tick();
 const contextTimer = setInterval(() => void contextMaintenance.tick(), 30000); void contextMaintenance.tick();
-const stop = async () => { voiceIngress.stop();clearInterval(contextTimer);contextMaintenance.stop();clearInterval(proactiveTimer);noticeDelivery.stop();clearInterval(replayTimer);clearInterval(assistantNoticeTimer); connection.stop();memberConnection.stop();engine.stop();memberEngine.stop(); await adapter.stop(); historyStore.close(); process.exit(0); };
+const stop = async () => { groupMute.stop();clearInterval(muteTimer);voiceIngress.stop();clearInterval(contextTimer);contextMaintenance.stop();clearInterval(proactiveTimer);noticeDelivery.stop();clearInterval(replayTimer);clearInterval(assistantNoticeTimer); connection.stop();memberConnection.stop();engine.stop();memberEngine.stop(); await adapter.stop(); historyStore.close(); process.exit(0); };
 process.once('SIGINT', () => void stop());
 process.once('SIGTERM', () => void stop());

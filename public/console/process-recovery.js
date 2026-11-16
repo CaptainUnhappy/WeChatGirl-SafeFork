@@ -1,5 +1,5 @@
 const escape=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-export const needsWeChatRepair = output => /HOOK_CLIENT_UNHEALTHY|HOOK_INITIALIZATION_TIMEOUT|HOOK_NOT_LISTENING|HOOK_COMPONENT_UPDATE_PENDING|HOOK_AUTH_FAILED|HOOK_CONNECTION_RESET|HOOK_HEALTH_FAILED|HOOK_MULTIPLE_ACCOUNT_DATABASES|HOOK_ACCOUNT_METADATA_INVALID|HOOK_ACCOUNT_MISMATCH/.test(String(output??''));
+export const needsWeChatRepair = output => /WECHAT_STARTUP_TIMEOUT|HOOK_CLIENT_UNHEALTHY|HOOK_INITIALIZATION_TIMEOUT|HOOK_NOT_LISTENING|HOOK_COMPONENT_UPDATE_PENDING|HOOK_AUTH_FAILED|HOOK_CONNECTION_RESET|HOOK_HEALTH_FAILED|HOOK_MULTIPLE_ACCOUNT_DATABASES|HOOK_ACCOUNT_METADATA_INVALID|HOOK_ACCOUNT_MISMATCH/.test(String(output??''));
 export const needsDshSetup = output => /DSH_IMPORT_|DSH_NOT_CONFIGURED|DSH_PLUGIN_NOT_READY|ACCOUNT_SWITCH_REQUIRES_DSH_RESTART|Install the DSH plugin|Fully.*reopen DSH/.test(String(output??''));
 const detail=item=>`<strong>${escape(item.name)} <span class="subtle">PID ${Number(item.pid)}</span></strong><span>${escape(item.reason)}</span><code>${escape(item.path||'无法确认程序路径')}</code>`;
 

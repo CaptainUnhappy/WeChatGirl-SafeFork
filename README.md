@@ -2,16 +2,18 @@
 
 一个 Windows 微信 AI 助手。给好友或群聊设置人格，让它回复消息、记住聊天内容，也可以通过微信交办已授权的 DSH 任务。
 
-[下载安装](https://github.com/my12yyds/WeChatGirl/releases/latest) · [下载包说明](docs/releases/0.5.10.md#下载哪个包) · [插件目录](docs/plugins/README.md) · [详细教程](docs/GETTING_STARTED.md)
+[下载安装](https://github.com/my12yyds/WeChatGirl/releases/latest) · [下载包说明](docs/releases/0.5.11.md#下载哪个包) · [插件目录](docs/plugins/README.md) · [详细教程](docs/GETTING_STARTED.md)
 
 ## 快速开始
 
-1. **下载安装。** Windows 10/11 x64 首选 `WeChatGirl-Setup-0.5.10-x64.exe`。便携版请完整解压，再打开根目录的 `WeChatGirl.exe`。
+1. **下载安装。** Windows 10/11 x64 首选 `WeChatGirl-Setup-0.5.11-x64.exe`。便携版请完整解压，再打开根目录的 `WeChatGirl.exe`。
 2. **连接微信。** 打开配置向导，按提示启动匹配的微信，登录并验证账号。当前内置微信为 4.1.15.13 x64，支持原生表情、语音和歌曲分段。文件与指定消息引用可启用前台兼容发送。
 3. **连接 DSH。** 单独安装或选择已有的 DeepSeek Harness，登录模型账号，按向导导入并启用插件。随后从托盘完整退出并重开 DSH，再选择模型。
 4. **试一次回复。** 在「聊天」添加一个允许回复的好友，选好人格和发送模式，应用配置并启动服务。请好友发一句「你好」，确认微信收到回复。
 
 需要语音、翻唱或更多能力时，在「能力 → 能力目录」按需导入插件。升级前先退出程序并保留 `data` 目录。 [安装与升级说明](docs/INSTALLER_RELEASE.md)
+
+QQ 讨论群 2155085499，可在程序右上角「更多 → 加入群聊讨论」复制群号。
 
 ## 详细说明
 
@@ -53,7 +55,7 @@
 
 ## 模型、图片与任务权限
 
-DSH 模型列表由当前已连接的 DSH 获取，可按聊天选择。模型可见不代表账号有可用额度。当前聊天模型支持图片时直接使用原图；纯文本模型可先调用备用识图模型，把观察结果交回原聊天模型。模型按能力分组，可搜索并独立测试。解析会使用模型额度，图片中的文字按不可信资料处理。详见[图片分流与测试](docs/IMAGE_UNDERSTANDING.md)。
+DSH 模型列表由当前已连接的 DSH 获取，可按聊天选择。支持图片的聊天模型可直接接收按设置压缩的图片，纯文本模型可通过备用模型获取图片描述。设置页可调整最长边、JPEG 画质和体积上限，并测试模型是否可用。[图片分流与测试](docs/IMAGE_UNDERSTANDING.md)
 
 聊天模式负责人格对话；助手模式负责任务交办。管理员 DSH 插件也可在聊天模式中申请任务，但必须同时满足真实管理员身份、本聊天授权和 DSH 原生权限。普通群友不会继承管理员工具权限。技能、工具与 WeChatGirl ZIP 插件分别管理；安装插件不等于授予执行权限。详见[按聊天授权](docs/DSH_CHAT_ACCESS.md)、[远程助手](docs/ASSISTANT_REMOTE.md)。
 

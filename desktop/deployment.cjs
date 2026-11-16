@@ -17,6 +17,7 @@ async function bootstrapDeployment(resourcesPath, dataHome, progress = () => {},
   const firstInstall = !fs.existsSync(path.join(workspace,'config/wechatagent.json'));
   const previousDistribution=path.join(workspace,'config/distribution.json');
   const previousSettings=fs.existsSync(previousDistribution)?JSON.parse(fs.readFileSync(previousDistribution,'utf8').replace(/^\uFEFF/,'')):{};
+  const defaultPlugins=new Set(Array.isArray(previousSettings.defaultPlugins)?previousSettings.defaultPlugins:[]);
   const externalDshHome=options.externalDshHome || previousSettings.externalDshHome || process.env.DSH_HOME || path.join(require('node:os').homedir(),'.dsh');
   const dshHome=options.dshHome || previousSettings.dshHome || (dshBundled && !fs.existsSync(path.join(workspace,'config/wechatagent.json')) ? path.join(dataHome,'dsh') : externalDshHome);
   fs.mkdirSync(workspace, { recursive: true });
@@ -90,13 +91,27 @@ async function bootstrapDeployment(resourcesPath, dataHome, progress = () => {},
     config.hook={...config.hook,expectedVersion:wechatVersion,wechatExecutable:path.relative(workspace,path.join(client,'Weixin.exe'))};
     fs.writeFileSync(configFile, JSON.stringify(config, null, 2) + '\n');
   }
-  if(firstInstall&&Array.isArray(manifest.essentialPlugins)&&manifest.essentialPlugins.length){
-    progress('正在准备基础插件（默认关闭）…');
+  if(Array.isArray(manifest.essentialPlugins)&&manifest.essentialPlugins.length){
+    progress('正在准备基础插件…');
     const {pathToFileURL}=require('node:url');
     const {PluginInstaller}=await import(pathToFileURL(path.join(workspace,'packages/plugin-api/installer.mjs')).href);
     const {BUNDLED_PLUGINS}=await import(pathToFileURL(path.join(workspace,'packages/plugin-api/bundled.mjs')).href);
+    const {updatePlugin}=await import(pathToFileURL(path.join(workspace,'packages/plugin-api/catalog.mjs')).href);
     const installer=new PluginInstaller(workspace);
-    try{for(const id of manifest.essentialPlugins){const bundle=BUNDLED_PLUGINS.find(b=>b.id===id&&b.essential&&b.zip);if(!bundle)throw Error('基础插件登记无效。');if(fs.existsSync(path.join(workspace,'plugins',id)))continue;const preview=installer.inspect({name:id+'.zip',zip:fs.readFileSync(path.join(workspace,bundle.zip)).toString('base64')});installer.install({ticket:preview.ticket,revision:preview.revision});}}finally{installer.dispose();}
+    try{
+      for(const id of manifest.essentialPlugins){
+        const bundle=BUNDLED_PLUGINS.find(b=>b.id===id&&b.essential&&b.zip);
+        if(!bundle)throw Error('基础插件登记无效。');
+        if(bundle.defaultEnabled&&defaultPlugins.has(id)||!firstInstall&&!bundle.defaultEnabled)continue;
+        if(fs.existsSync(path.join(workspace,'plugins',id))){if(bundle.defaultEnabled)defaultPlugins.add(id);continue;}
+        const preview=installer.inspect({name:id+'.zip',zip:fs.readFileSync(path.join(workspace,bundle.zip)).toString('base64')});
+        const installed=installer.install({ticket:preview.ticket,revision:preview.revision});
+        if(bundle.defaultEnabled){
+          updatePlugin(workspace,id,{revision:installed.revision,enabled:true,permissions:[],chats:null,settings:{}});
+          defaultPlugins.add(id);
+        }
+      }
+    }finally{installer.dispose();}
   }
   const distributionFile = path.join(workspace, 'config', 'distribution.json');
   if (fs.existsSync(distributionFile)) {
@@ -111,7 +126,7 @@ async function bootstrapDeployment(resourcesPath, dataHome, progress = () => {},
       fs.writeFileSync(pendingFile,JSON.stringify({...pending,pendingApply:true,dshRestartRequired:true},null,2));
     }
   }
-  fs.writeFileSync(distributionFile, JSON.stringify({ version: manifest.version, buildId:manifest.buildId, runtimeRevision:manifest.runtimeRevision, installed: true, dataHome, python, node, dshBundled, dsh, dshHome, externalDshHome, assets: resourcesPath }, null, 2));
+  fs.writeFileSync(distributionFile, JSON.stringify({ version: manifest.version, buildId:manifest.buildId, runtimeRevision:manifest.runtimeRevision, installed: true, dataHome, python, node, dshBundled, dsh, dshHome, externalDshHome, assets: resourcesPath, defaultPlugins:[...defaultPlugins] }, null, 2));
   progress('本机运行环境已准备，正在打开控制台…');
   return { root: workspace, node, python, dataHome, version: manifest.version };
 }

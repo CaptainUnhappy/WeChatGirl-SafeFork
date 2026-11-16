@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {createUpdateChecker,UPDATE_REPOSITORY} from './update-check.mjs';
 import {downloadLinks,QUARK_DOWNLOAD_URL} from '../public/console/download-links.mjs';
+import {startUpdateUI} from '../public/console/updates.js';
 
 test('manual downloads place Quark first and preserve the registered GitHub attachment',()=>{
   const asset='https://github.com/my12yyds/WeChatGirl/releases/download/v0.5.10/WeChatGirl-plugins-all-0.5.10.zip';
@@ -12,6 +13,21 @@ test('manual downloads place Quark first and preserve the registered GitHub atta
   assert(links.indexOf(QUARK_DOWNLOAD_URL)>=0&&links.indexOf(QUARK_DOWNLOAD_URL)<links.indexOf(asset));
   assert.match(downloadLinks('https://example.invalid/fake.exe'),/github\.com\/my12yyds\/WeChatGirl\/releases\/latest/);
   assert.doesNotMatch(downloadLinks('https://example.invalid/fake.exe'),/example\.invalid/);
+});
+
+test('manual update check reveals both download sources even when the update service fails',async t=>{
+  const elements=new Map(['check-updates','update-banner','update-message','update-download','update-notes','dismiss-update'].map(id=>['#'+id,{
+    hidden:true,addEventListener(_event,callback){this.click=callback;},scrollIntoView(){this.scrolled=true;},
+  }]));
+  const original=Object.getOwnPropertyDescriptor(globalThis,'document');
+  Object.defineProperty(globalThis,'document',{configurable:true,value:{querySelector:id=>elements.get(id)}});
+  t.after(()=>{if(original)Object.defineProperty(globalThis,'document',original);else delete globalThis.document;});
+  startUpdateUI({api:async()=>{throw Error('offline');},toast:()=>{}});
+  await elements.get('#check-updates').click();
+  assert.equal(elements.get('#update-banner').hidden,false);
+  assert.equal(elements.get('#update-banner').scrolled,true);
+  const links=elements.get('#update-download').innerHTML;
+  assert(links.indexOf(QUARK_DOWNLOAD_URL)>=0&&links.indexOf(QUARK_DOWNLOAD_URL)<links.indexOf('https://github.com/'));
 });
 
 function fixture(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'wechatgirl-update-repo-'));fs.writeFileSync(path.join(root,'package.json'),JSON.stringify({version:'0.5.1'}));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));return root;}

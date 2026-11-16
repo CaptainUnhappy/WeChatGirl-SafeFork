@@ -32,10 +32,11 @@ if($build.stickerProfile -eq 'gif-manager-v1' -and $build.stickerCoreSha256 -eq 
 @{baseUrl=$BaseUrl.TrimEnd('/');expectedVersion='4.1.15.13';imageRoot=[IO.Path]::GetFullPath($imageRoot);voiceRoot=(Join-Path $root 'state\voice\outgoing');
     stickerProfile=$stickerProfile;stickerRoot=(Join-Path $root 'state\stickers\outgoing')} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $native 'wechatagent-hook.json') -Encoding UTF8
 if ($PrepareOnly) { Write-Output 'Current-version text sender prepared; no process changed.'; return }
-$processes = @(Get-CimInstance Win32_Process -Filter "Name='Weixin.exe'" | Where-Object { $_.ExecutablePath -eq $Executable -and $_.CommandLine -notmatch '--type=|--crashpad-handler' })
-if ($processes.Count -ne 1) { throw 'Open exactly one matching WeChat main process before loading its native text sender.' }
-$targetPid = [int]$processes[0].ProcessId
-if(-not @((Get-Process -Id $targetPid -ErrorAction Stop).Modules | Where-Object FileName -EQ $core).Count) { throw 'WeChat matching core is not loaded.' }
+. (Join-Path $PSScriptRoot 'hook-client-health.ps1')
+$processes = @(Get-HookCoreProcess $Executable $core)
+if($processes.Count -gt 1){throw 'WECHAT_MULTIPLE_MATCHING_CLIENTS'}
+if($processes.Count -eq 0){throw 'WECHAT_STARTUP_TIMEOUT: The configured WeChat core is not loaded.'}
+$targetPid = [int]$processes[0].Id
 $listener = @(Get-NetTCPConnection -LocalPort $uri.Port -State Listen -ErrorAction SilentlyContinue)
 if ($listener.Count -and @($listener | Where-Object OwningProcess -ne $targetPid).Count) { throw 'HOOK_PORT_OWNER_MISMATCH' }
 # Explicit load only: no client-file replacement, window controls, restarts or
@@ -44,7 +45,6 @@ if (-not $listener.Count) {
     & $loader $targetPid
     if ($LASTEXITCODE -ne 0) { throw 'Native text loader failed; no automatic reload attempted.' }
 }
-. (Join-Path $PSScriptRoot 'hook-client-health.ps1')
 Wait-HookClient $Executable $BaseUrl '4.1.15.13' $tokenFile
 $health = Invoke-RestMethod -Uri ($BaseUrl.TrimEnd('/')+'/WeChatAgent/health') -Headers @{Authorization='Bearer '+$token} -TimeoutSec 2
 if($health.profile -ne $build.profile -or $health.loaderInit -ne $build.loaderInit -or ($build.voiceProfile -and $health.voiceProfile -ne $build.voiceProfile) -or

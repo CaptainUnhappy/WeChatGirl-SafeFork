@@ -52,7 +52,7 @@ export class ProactiveEngine {
   eligible(key,policy,now){
     const rows=this.buffer.recent(key,this.buffer.maxPerChat);
     const last=rows.at(-1)?.timestamp*1000||0;
-    return policy.enabled&&withinProactiveWindow(now,policy)&&!this.buffer.unread(key,1).length&&!this.buffer.pendingReplies.has(key)&&
+    return policy.enabled&&!this.social.muted?.(key)&&withinProactiveWindow(now,policy)&&!this.buffer.unread(key,1).length&&!this.buffer.pendingReplies.has(key)&&
       now-last>=policy.idleMinutes*60000&&!declinedProactive(rows)&&rows.at(-1)?.delivery_status!=='unconfirmed';
   }
   notice(key,id){this.buffer.setContextNotice(key,{id,text:'本机上一轮主动发言草稿已取消，未确认提交到微信；不能将原生会话中的那段草稿当成已经说过的话。'});}

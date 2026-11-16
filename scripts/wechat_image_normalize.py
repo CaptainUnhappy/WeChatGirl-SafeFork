@@ -73,7 +73,18 @@ def decode_image_source(raw, timeout=5):
         return best
     raise RuntimeError('IMAGE_WXGF_DECODE_FAILED')
 
-def normalize_image(raw, animated=False, *, max_side=1280, max_source_bytes=8 * 1024 * 1024):
+def image_compression(settings):
+    settings = settings if isinstance(settings, dict) else {}
+    def value(key, minimum, maximum, default):
+        setting = settings.get(key)
+        return setting if type(setting) is int and minimum <= setting <= maximum else default
+    return {'max_side': value('maxSide', 512, 2048, 2048),
+            'jpeg_quality': value('jpegQuality', 45, 95, 85),
+            'max_kib': value('maxKiB', 96, 768, 768)}
+
+
+def normalize_image(raw, animated=False, *, max_side=1280, max_source_bytes=8 * 1024 * 1024,
+                    jpeg_quality=85, max_kib=768):
     if not raw or len(raw) > max_source_bytes:
         raise RuntimeError('IMAGE_TOO_LARGE_OR_EMPTY')
     with Image.open(io.BytesIO(raw)) as source:
@@ -102,13 +113,13 @@ def normalize_image(raw, animated=False, *, max_side=1280, max_source_bytes=8 * 
         # Keep small text legible when possible, while retaining the existing
         # transport cap. Detailed photos may need another bounded resize.
         for _ in range(8):
-            for quality in (85, 75, 65):
+            for quality in dict.fromkeys(max(45, jpeg_quality - offset) for offset in (0, 10, 20)):
                 output = io.BytesIO()
                 image.save(output, format='JPEG', quality=quality, optimize=True)
                 data = output.getvalue()
-                if len(data) <= 768 * 1024:
+                if len(data) <= max_kib * 1024:
                     break
-            if len(data) <= 768 * 1024:
+            if len(data) <= max_kib * 1024:
                 break
             image.thumbnail((max(1, int(image.width * .8)), max(1, int(image.height * .8))), Image.Resampling.LANCZOS)
         else:

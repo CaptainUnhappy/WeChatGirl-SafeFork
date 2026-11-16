@@ -37,7 +37,8 @@ export class WechatOneBotAdapter extends BaseAdapter {
     const supported=message.message_type==='text'||
       message.message_type==='image'&&message.images.length>0||
       message.message_type==='file'&&message.files.length>0||
-      message.message_type==='record'&&!!message.voice;
+      message.message_type==='record'&&!!message.voice||
+      message.message_type==='video'&&!!message.videoId;
     if(!supported){this.log(`[WeChat] unsupported_message_type=${message.message_type}`);return;}
     if (!message.text) return;
     const now = Date.now(); this.#prune(now);
@@ -54,7 +55,10 @@ export class WechatOneBotAdapter extends BaseAdapter {
 
   async start() { await this.server.start(); }
   async stop() { await this.server.stop(); }
-  async sendText({ kind, target, text, deliveryId, source, contextId, mention, quoteServerId }) {
+  async openReceivedVideo(kind,target,id,previousClicks){
+    return (await this.server.action('open_received_video',{kind,target,id,previousClicks})).data?.clicked===true;
+  }
+  async sendText({ kind, target, text, deliveryId, source, contextId, mention, quoteServerId, receiptOnly }) {
     if (kind !== 'private' && kind !== 'group') throw new TypeError('invalid WeChat kind');
     const content = String(text ?? '').trim();
     if (!content) throw new TypeError('empty WeChat message');
@@ -67,6 +71,7 @@ export class WechatOneBotAdapter extends BaseAdapter {
       message: [...(mention?[{type:'at',data:{qq:mention.id}}]:[]),{ type: 'text', data: { text: content } }],...(deliveryId?{wechatagent_delivery_id:deliveryId}:{}),
       ...(mention?{wechatagent_mention:{wxid:mention.wxid,name:mention.name}}:{}),
       ...(quoteServerId!==undefined?{wechatagent_quote_server_id:quoteServerId}:{}),
+      ...(receiptOnly?{wechatagent_receipt_only:true}:{}),
       ...(source==='proactive'?{wechatagent_source:'proactive',wechatagent_context_id:contextId}:{}) };
     let result;
     try{result=await this.server.action(action,params);}

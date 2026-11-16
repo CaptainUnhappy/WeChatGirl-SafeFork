@@ -10,6 +10,7 @@
     "baseUrl": "http://127.0.0.1:30001",
     "expectedVersion": "4.1.15.13",
     "wechatExecutable": "state/hook/wechat-4.1.15.13/Weixin.exe",
+    "cancelUpdateAndRestart": false,
     "requestTimeoutMs": 5000,
     "receiptTimeoutMs": 18000,
     "maxConcurrentSends": 4

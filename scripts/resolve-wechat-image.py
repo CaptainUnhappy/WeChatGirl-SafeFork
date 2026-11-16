@@ -104,7 +104,7 @@ def resolve(descriptor):
                             width, height = image.size
                         area = width * height
                         if best_area < area <= 40_000_000:
-                            best = {**normalize_image(raw, max_side=2048, max_source_bytes=media.MAX_IMAGE_SOURCE_SIZE),
+                            best = {**normalize_image(raw, max_source_bytes=media.MAX_IMAGE_SOURCE_SIZE, **descriptor.get('compression', {'max_side': 2048})),
                                 'sourceQuality': 'thumbnail' if thumbnail else 'full', 'sourceWidth': width, 'sourceHeight': height,
                                 '_imageSource': {'version': media.IMAGE_SOURCE_VERSION, 'ids': ids, 'fingerprint': fingerprint}}
                             best_area = area

@@ -6,6 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {createRequire} from 'node:module';
 import {RUNTIME_COMPONENTS,peExports,verifyReaderKey,verifyPackagedComponents} from './runtime-components.mjs';
+import {configuration,updatePlugin} from '../packages/plugin-api/catalog.mjs';
 const {bootstrapDeployment}=createRequire(import.meta.url)('../desktop/deployment.cjs');
 const hash=b=>crypto.createHash('sha256').update(b).digest('hex');
 function fixture(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'wechatgirl-native-component-'));t.after(()=>{assert.ok(path.resolve(root).startsWith(path.resolve(os.tmpdir())+path.sep));fs.rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:50});});return root;}
@@ -59,4 +60,32 @@ test('4.1.15.13 first deployment installs the matching client and verified sende
  assert.deepEqual(JSON.parse(fs.readFileSync(configFile)).hook,config.hook);
  write(path.join(native,'wechatagent-text-loader.exe'),'corrupt-loader');
  await assert.rejects(bootstrapDeployment(resources,home),/发送组件校验失败/);
+});
+
+test('packaged group mute is enabled on fresh installs and upgrades while explicit settings survive',async t=>{
+ const root=fixture(t),resources=path.join(root,'resources'),project=path.join(resources,'project');
+ const files=['config/wechatagent.example.json','packages/plugin-api/bundled.mjs','packages/plugin-api/catalog.mjs','packages/plugin-api/installer.mjs','packages/plugin-api/zip.mjs',
+   'packages/plugin-api/contract.mjs','packages/plugin-api/settings-protection.mjs','packages/extension-runtime/catalog.mjs','packages/netease/credential.ps1','optional-extensions/packages/group-mute-1.0.0.zip'];
+ const projectConfig={runtime:{},wechat:{whitelist:{private:[],groups:['123']}}};
+ write(path.join(project,files[0]),JSON.stringify(projectConfig));
+ for(const file of files.slice(1))write(path.join(project,file),fs.readFileSync(path.resolve(file)));
+ write(path.join(project,'deployment.json'),JSON.stringify({version:'0.5.11',runtimeRevision:'fixture',dshBundled:false,essentialPlugins:['group-mute'],files}));
+ write(path.join(resources,'runtime/python/python.exe'),'python');write(path.join(resources,'runtime/node.exe'),'node');
+ write(path.join(resources,'vendor/wechat/Weixin.exe'),'client');
+ write(path.join(resources,'vendor/hook/version.dll'),'synthetic-hook');
+ write(path.join(resources,'vendor/hook/build.json'),JSON.stringify({sha256:hash(Buffer.from('synthetic-hook'))}));
+ for(const kind of ['fresh','upgrade']){
+   const home=path.join(root,kind),workspace=path.join(home,'workspace');
+   if(kind==='upgrade')write(path.join(workspace,'config/wechatagent.json'),JSON.stringify(projectConfig));
+   await bootstrapDeployment(resources,home);
+   const installed=configuration(workspace);
+   assert.equal(installed.config.plugins['group-mute'].enabled,true);
+   assert.equal(installed.config.plugins['group-mute'].chats,null);
+   assert.equal(installed.config.plugins['group-mute'].settings.useAssistantAdministrators,true);
+   updatePlugin(workspace,'group-mute',{revision:installed.revision,enabled:false,permissions:[],chats:['wechat:group:123'],settings:{defaultMinutes:5}});
+   await bootstrapDeployment(resources,home);
+   const retained=configuration(workspace).config.plugins['group-mute'];
+   assert.equal(retained.enabled,false);
+   assert.equal(retained.settings.defaultMinutes,5);
+ }
 });

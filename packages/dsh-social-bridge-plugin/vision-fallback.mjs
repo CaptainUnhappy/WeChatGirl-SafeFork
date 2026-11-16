@@ -7,7 +7,11 @@ import {modelCatalog,validModelId} from './model-routing.mjs';
 export const VISION_DEFAULTS=Object.freeze({enabled:true,selection:null});
 export function validateVisionSettings(value){
   if(value===undefined)return;
-  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!['enabled','selection'].includes(key))||typeof value.enabled!=='boolean')throw Error('VISION_SETTINGS_INVALID');
+  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!['enabled','selection','compression'].includes(key))||typeof value.enabled!=='boolean')throw Error('VISION_SETTINGS_INVALID');
+  const compression=value.compression;
+  const ranges={maxSide:[512,2048],jpegQuality:[45,95],maxKiB:[96,768]};
+  if(compression!==undefined&&(!compression||typeof compression!=='object'||Array.isArray(compression)||
+    Object.entries(compression).some(([key,setting])=>!Object.hasOwn(ranges,key)||!Number.isInteger(setting)||setting<ranges[key][0]||setting>ranges[key][1])))throw Error('VISION_SETTINGS_INVALID');
   const selected=value.selection;
   if(selected!==null&&selected!==undefined&&(!selected||typeof selected!=='object'||Array.isArray(selected)||Object.keys(selected).some(key=>!['provider','model'].includes(key))||!validModelId(selected.provider)||!validModelId(selected.model)))throw Error('VISION_SETTINGS_INVALID');
 }
@@ -63,7 +67,7 @@ export function createVisionFallback({ctx,root,createUserMessage,BlockAssembler,
   return {describe,async test(body,{signal}={}){
     if(!body||Object.keys(body).some(key=>!['selection','chatSelection','b64','mime','mode','enabled','video'].includes(key))||typeof body.b64!=='string'||body.b64.length>1050000||!['image/png','image/jpeg','image/webp'].includes(body.mime))throw Error('VISION_TEST_INVALID');
     const video=body.video;
-    if(video!==undefined&&(!video||typeof video!=='object'||Object.keys(video).some(key=>!['seconds','frames'].includes(key))||!Number.isFinite(video.seconds)||video.seconds<=0||video.seconds>180||![4,6,8].includes(video.frames)))throw Error('VISION_TEST_INVALID');
+    if(video!==undefined&&(!video||typeof video!=='object'||Object.keys(video).some(key=>!['seconds','frames'].includes(key))||!Number.isFinite(video.seconds)||video.seconds<=0||!Number.isSafeInteger(video.frames)||video.frames<2||video.frames>16))throw Error('VISION_TEST_INVALID');
     validateVisionSettings({enabled:true,selection:body.selection??null});
     if(body.mode!==undefined&&!['route','parser'].includes(body.mode))throw Error('VISION_TEST_INVALID');
     let chat=body.chatSelection;if(!chat||!validModelId(chat.provider)||!validModelId(chat.model)){if(body.mode==='parser')chat={};else throw Error('VISION_TEST_CHAT_MODEL_REQUIRED');}if(body.enabled!==undefined&&typeof body.enabled!=='boolean')throw Error('VISION_TEST_INVALID');
