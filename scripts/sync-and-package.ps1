@@ -1,5 +1,5 @@
 param(
- [string]$Version='0.5.11',
+ [string]$Version='0.5.12',
  [string]$Baseline='D:\weixiagen\release\archive\WeChatAgent-0.4.3',
  [string]$ClientRoot='D:\weixiagen\data\workspace\state\hook\wechat-4.1.15.13',
  [string]$HookRoot='D:\weixiagen\data\workspace\state\hook\native-4.1.15.13',
@@ -71,9 +71,11 @@ Copy-Tree $baselineApp (Join-Path $stage 'app') @(
 ) @('storage.ini','*.token','uninstall.exe','Uninstall WeChatGirl.exe','Uninstall WeChatAgent.exe','uninstallerIcon.ico')
 $project=Join-Path $resources 'project'
 New-Item -ItemType Directory -Path $project -Force|Out-Null
+& node (Join-Path $repo 'scripts/pack-bundled-plugins.mjs')
+if($LASTEXITCODE -ne 0){throw 'Failed to build the bundled plugin set.'}
 $pluginCatalog=Get-Content -LiteralPath (Join-Path $repo 'packages/plugin-distribution/catalog.json') -Raw|ConvertFrom-Json
-$corePluginSources=@($pluginCatalog.entries|Where-Object {$_.essential}|ForEach-Object {$_.source+'/'})
-$corePluginArchives=@($pluginCatalog.entries|Where-Object {$_.essential}|ForEach-Object {'optional-extensions/packages/'+$_.file;'optional-extensions/packages/'+$_.file+'.sha256'})
+$corePluginSources=@($pluginCatalog.entries|ForEach-Object {$_.source+'/'})
+$corePluginArchives=@($pluginCatalog.entries|ForEach-Object {'optional-extensions/packages/'+$_.file;'optional-extensions/packages/'+$_.file+'.sha256'})
 $sourceFiles=@(& git -C $repo -c core.quotepath=false ls-files --cached --others --exclude-standard)
 if($LASTEXITCODE -ne 0){throw 'Could not enumerate source files.'}
 foreach($relative in $sourceFiles){
@@ -122,10 +124,10 @@ Get-ChildItem -LiteralPath $project -File -Recurse|Sort-Object FullName|ForEach-
 $seed=($hashes.GetEnumerator()|ForEach-Object{$_.Key+':'+$_.Value}) -join [Environment]::NewLine
 $sha=[Security.Cryptography.SHA256]::Create()
 try{$buildId=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($seed))).Replace('-','').ToLowerInvariant()).Substring(0,16)}finally{$sha.Dispose()}
-$manifest=[ordered]@{version=$Version;packageVersion=$Version;buildId=$buildId;builtAt=[DateTime]::UtcNow.ToString('o');runtimeRevision='db3bce768f85';wechatVersion=$wechatVersion;dshBundled=$false;pluginDistribution='core';essentialPlugins=@($pluginCatalog.entries|Where-Object {$_.essential}|ForEach-Object {$_.id});files=@($hashes.Keys);sourceHashes=$hashes}
+$manifest=[ordered]@{version=$Version;packageVersion=$Version;buildId=$buildId;builtAt=[DateTime]::UtcNow.ToString('o');runtimeRevision='db3bce768f85';wechatVersion=$wechatVersion;dshBundled=$false;pluginDistribution='all';bundledPlugins=@($pluginCatalog.entries|ForEach-Object {$_.id});files=@($hashes.Keys);sourceHashes=$hashes}
 [IO.File]::WriteAllText((Join-Path $project 'deployment.json'),($manifest|ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false))
 & (Join-Path $repo 'scripts/build-launcher.ps1') -OutputPath (Join-Path $stage 'WeChatGirl.exe')
-$guide=@("WeChatGirl $Version | Windows 10/11 x64",'请先完整解压，再双击根目录 WeChatGirl.exe，无须打开命令窗口。','不要在压缩包中运行，也不要只复制一个 EXE。程序文件在 app，首次启动会在同级 data 保存配置。','DSH 需单独安装，请跟随首次配置向导完成连接。','需要本地语音时，在音乐页下载并导入语音组件 ZIP；组件不包含全部模型。','升级前保存设置并从托盘完整退出程序，保留原有 data。安装版使用 Windows 已安装的应用或 app/Uninstall WeChatGirl.exe 卸载；便携版退出后删除程序目录即可，数据需自行保留。') -join [Environment]::NewLine
+$guide=@("WeChatGirl $Version | Windows 10/11 x64",'请先完整解压，再双击根目录 WeChatGirl.exe，无须打开命令窗口。','不要在压缩包中运行，也不要只复制一个 EXE。程序文件在 app，首次启动会在同级 data 保存配置。','DSH 需单独安装，请跟随首次配置向导完成连接。','插件随包安装，请按需启用。本机语音识别模型可在语音音色页下载。','升级前保存设置并从托盘完整退出程序，保留原有 data。安装版使用 Windows 已安装的应用或 app/Uninstall WeChatGirl.exe 卸载；便携版退出后删除程序目录即可，数据需自行保留。') -join [Environment]::NewLine
 [IO.File]::WriteAllText((Join-Path $stage 'README-portable.txt'),$guide,[Text.UTF8Encoding]::new($false))
 & (Join-Path $repo 'scripts/build-release.ps1') -PayloadRoot $stage -OutputDirectory $OutputDirectory -Version $Version -VoiceComponentsZip $VoiceComponentsZip
 Write-Host "Ready: $stage"

@@ -1,18 +1,58 @@
 {
   "id": "group-mute",
   "name": "群聊闭嘴",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "apiVersion": 2,
   "host": "wechatagent",
   "author": "WeChatGirl",
-  "description": "授权成员可在选定群聊发送「闭嘴 30分钟」或「解除闭嘴」。暂停期间机器人保持静音，到期或提前解除后由当前人格发一次恢复提示。",
+  "description": "一档仅在群里被艾特时回复，二档完全静音，需授权成员发送「解除闭嘴」才恢复。静音结束后，机器人用当前人格发一次恢复提示。",
   "permissions": [],
   "requiresAccount": true,
-  "settings": { "useAssistantAdministrators": true, "extraOperators": [], "defaultMinutes": 15, "maxMinutes": 120 },
+  "settings": {
+    "useAssistantAdministrators": true,
+    "extraOperators": [],
+    "defaultMinutes": 15,
+    "maxMinutes": 120,
+    "defaultMode": "一档 · 仅艾特时回复"
+  },
   "configSchema": {
-    "useAssistantAdministrators": {"type":"boolean","title":"允许已有 DSH 管理员","description":"开启后，当前微信账号配置中的 DSH 管理员可开始和解除静音。关闭后只接受下方的额外授权成员。"},
-    "extraOperators": {"type":"array","items":{"type":"string","minLength":1,"maxLength":128},"title":"额外授权成员","description":"填写真实微信 ID，每行一个。此名单只授予静音和解除权限。"},
-    "defaultMinutes": {"type":"integer","minimum":1,"maximum":1440,"title":"默认闭嘴时间（分钟）","description":"只发「闭嘴」时使用，默认 15 分钟。"},
-    "maxMinutes": {"type":"integer","minimum":1,"maximum":1440,"title":"单次上限（分钟）","description":"默认最多 120 分钟，可调至 1440 分钟。超出上限的命令不会执行。"}
+    "useAssistantAdministrators": {
+      "type": "boolean",
+      "title": "允许已有 DSH 管理员",
+      "description": "开启后，当前微信账号配置中的 DSH 管理员可开始和解除静音。关闭后只接受下方的额外授权成员。"
+    },
+    "extraOperators": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "title": "额外授权成员",
+      "description": "填写真实微信 ID，每行一个。此名单只授予静音和解除权限。"
+    },
+    "defaultMinutes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1440,
+      "title": "默认闭嘴时间（分钟）",
+      "description": "仅一档使用。没指定时长时默认 15 分钟。"
+    },
+    "maxMinutes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1440,
+      "title": "单次上限（分钟）",
+      "description": "仅一档使用。默认最多 120 分钟，超出设定上限的命令不会执行。"
+    },
+    "defaultMode": {
+      "type": "string",
+      "title": "只发「闭嘴」时使用的档位",
+      "enum": [
+        "一档 · 仅艾特时回复",
+        "二档 · 完全静音"
+      ],
+      "description": "一档按时长生效，收到艾特仍可回复；二档不自动到期，只能由授权成员发送「解除闭嘴」恢复。可以在群中用「闭嘴 1档」或「闭嘴 2档」指定本次档位。"
+    }
   }
 }

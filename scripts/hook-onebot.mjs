@@ -15,7 +15,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import {pluginEnabled} from '../packages/plugin-api/catalog.mjs';
-import {groupMuted} from '../packages/plugin-api/group-mute.mjs';
+import {groupMuted,groupMuteBlocks,groupMuteState,validMuteMentionId} from '../packages/plugin-api/group-mute.mjs';
 
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = file => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
@@ -202,8 +202,9 @@ export class HookOneBot {
     if(!result.accepted)fail(/^FOREGROUND_[A-Z_]+$/.test(result.code??'')?result.code:'FOREGROUND_VIDEO_UNAVAILABLE');
     return {clicked:true};
   }
-  async send(kind, target, text, deliveryId, proactive, mention, quoteServerId, receiptOnly=false) {
-    if(!receiptOnly&&kind==='group'&&groupMuted(this.directory,'wechat:group:'+target))fail('GROUP_MUTED');
+  async send(kind, target, text, deliveryId, proactive, mention, quoteServerId, receiptOnly=false, muteMentionId) {
+    const muteBlocked=()=>kind==='group'&&groupMuteBlocks(groupMuteState(this.directory,'wechat:group:'+target),muteMentionId);
+    if(!receiptOnly&&muteBlocked())fail('GROUP_MUTED');
     const key = `${kind}:${target}`;
     if (this.targetsSending.has(key) || this.targetsSending.size >= (this.hook.maxConcurrentSends ?? 4)) fail('SENDER_BUSY');
     this.targetsSending.add(key);
@@ -268,13 +269,13 @@ export class HookOneBot {
         };
         let accepted;
         try{
-          if(kind==='group'&&groupMuted(this.directory,'wechat:group:'+target))fail('GROUP_MUTED');
+          if(muteBlocked())fail('GROUP_MUTED');
           if(mode==='foreground'){
             accepted=await this.foreground.send({executable:path.resolve(this.directory,this.hook.wechatExecutable),name:targetSession.displayName,text,...(quote?{quote:quotedText}:{})},async()=>{
               this.reload();if(!(quote?compatibilityMediaEnabled(this.project):this.project.wechat?.textTransport?.mode==='foreground')||!this.allowed(kind,target))fail('CONVERSATION_NOT_ALLOWED');
               if(quote&&(await this.checkNative()).account!==identity.account)fail('TEXT_DELIVERY_ACCOUNT_MISMATCH');
               const current=await this.foregroundTarget(kind,target);if(current.username!==wxid||current.displayName!==targetSession.displayName)fail('TARGET_MAPPING_AMBIGUOUS_OR_MISSING');
-              if(kind==='group'&&groupMuted(this.directory,'wechat:group:'+target))fail('GROUP_MUTED');
+              if(muteBlocked())fail('GROUP_MUTED');
             });
             if(!accepted?.accepted)throw Error(accepted?.attempted===false&&/^FOREGROUND_[A-Z_]+$/.test(accepted.code??'')?accepted.code:'FOREGROUND_SUBMISSION_UNCONFIRMED');
             accepted={ret:0};
@@ -506,6 +507,8 @@ export class HookOneBot {
         if(params.wechatagent_source==='proactive'&&(!deliveryId||!/^[a-f0-9]{64}$/.test(params.wechatagent_context_id??'')||
           params.wechatagent_preceding_delivery_id!==undefined&&!/^[a-f0-9]{64}$/.test(params.wechatagent_preceding_delivery_id)))fail('INVALID_PROACTIVE_CONTEXT');
         const proactive=params.wechatagent_source==='proactive'?{contextId:params.wechatagent_context_id,...(params.wechatagent_preceding_delivery_id?{precedingDeliveryId:params.wechatagent_preceding_delivery_id}:{})}:null;
+        const muteMentionId=params.wechatagent_mute_mention_id;
+        if(muteMentionId!==undefined&&(kind!=='group'||proactive||!validMuteMentionId(muteMentionId)))fail('INVALID_MUTE_MENTION');
         if(Array.isArray(params.message)&&params.message.length===1&&params.message[0]?.type==='wechat_sticker'){
           data=await this.sendSticker(kind,target,String(params.message[0].data?.id??''),deliveryId,proactive,params.wechatagent_receipt_only===true,params.wechatagent_defer_receipt===true,params.wechatagent_deadline_at,params.wechatagent_abandon_delivery===true);
         }else{
@@ -523,10 +526,10 @@ export class HookOneBot {
             const wxidMember=[...identities][0],name=String(params.wechatagent_mention?.name??'').trim();
             mention={id,wxid:wxidMember,name};
             if(!validMention(mention)||params.wechatagent_mention?.wxid!==wxidMember)fail('INVALID_WECHAT_MENTION');
-            data=await this.send(kind,target,text,deliveryId,proactive,mention,undefined,params.wechatagent_receipt_only===true);
+            data=await this.send(kind,target,text,deliveryId,proactive,mention,undefined,params.wechatagent_receipt_only===true,muteMentionId);
           }else{
             const text=textSegments(params.message);
-            data=await this.send(kind,target,text,deliveryId,proactive,undefined,quoteServerId,params.wechatagent_receipt_only===true);
+            data=await this.send(kind,target,text,deliveryId,proactive,undefined,quoteServerId,params.wechatagent_receipt_only===true,muteMentionId);
           }
         }
       } else if(action==='open_received_video'){
@@ -593,7 +596,11 @@ export class HookOneBot {
     if(payload.type===43)segments.push({type:'video',data:{file:'wechatagent://video/'+payload.video.id,media_id:payload.video.id}});
     if(payload.type===25769803825)segments.push({type:'file',data:{id:payload.file.id,name:payload.file.name,size:payload.file.size}});
     if ([3,47].includes(payload.type)) segments.push({type:'image',data:{file:'wechatagent://image/'+payload.image.id,media_id:payload.image.id,...(payload.type===47?{media_kind:'sticker'}:{})}});
-    if (group && this.project.account.nicknames.some(n => content.includes('@' + n + '\u2005') || content.endsWith('@' + n))) segments.unshift({ type: 'at', data: { qq: String(selfId) } });
+    if(group){
+      const mention=this.project.account.nicknames.map(name=>'@'+name)
+        .find(label=>content.includes(label+'\u2005')||content.endsWith(label));
+      if(mention)segments.unshift({type:'at',data:{qq:String(selfId),wechat_text:mention,wechat_verified:content.includes(mention+'\u2005')}});
+    }
     return { time: payload.timestamp || Math.floor(Date.now() / 1000), self_id: selfId, post_type: 'message',
       message_type: kind, sub_type: group ? 'normal' : 'friend', message_id: payload.rawid,
       user_id: userId, message: segments, raw_message: content,

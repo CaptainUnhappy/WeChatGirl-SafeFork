@@ -99,7 +99,7 @@ export class MessageBuffer {
       sender_name: String(message.sender_name ?? ''), message_id: String(message.message_id ?? ''),
       ...(!outgoing&&message.kind==='group'&&/^[a-f0-9]{64}$/.test(message.sender_key??'')?{sender_key:message.sender_key}:{}),
       ...(typeof message.sender_wxid==='string'?{sender_wxid:message.sender_wxid}:{}),
-      self_id:String(message.self_id??''),...(message.work_mode?{work_mode:message.work_mode}:{}),
+      self_id:String(message.self_id??''),...(message.work_mode?{work_mode:message.work_mode}:{}),...(/^[a-f0-9]{64}$/.test(message.muteMentionId??'')?{muteMentionId:message.muteMentionId}:{}),
       ...(message.assistant_chat_only===true?{assistant_chat_only:true}:{}),
       text: String(message.text ?? '').slice(0, 4000), timestamp: Number(message.timestamp) || Date.now() / 1000,
       images: outgoing ? [] : (message.images ?? []).filter(image => /^[a-f0-9]{64}$/.test(image?.id ?? '')).slice(0,4),
@@ -136,7 +136,7 @@ export class MessageBuffer {
     const message=item.message;
     this.pendingRequests.delete(key);
     this.pendingReplies.set(key,{...item,message:{platform:message.platform,kind:message.kind,conversation_id:String(message.conversation_id),
-      conversation_name:String(message.conversation_name??''),self_id:String(message.self_id??''),sender_id:String(message.sender_id??''),sender_name:String(message.sender_name??''),...(verifiedAssistantSender(message)?{sender_wxid:message.sender_wxid}:{}),...(message.work_mode?{work_mode:message.work_mode}:{}),...(message.assistant_chat_only===true?{assistant_chat_only:true}:{})}});
+      conversation_name:String(message.conversation_name??''),self_id:String(message.self_id??''),sender_id:String(message.sender_id??''),sender_name:String(message.sender_name??''),...(verifiedAssistantSender(message)?{sender_wxid:message.sender_wxid}:{}),...(message.work_mode?{work_mode:message.work_mode}:{}),...(/^[a-f0-9]{64}$/.test(message.muteMentionId??'')?{muteMentionId:message.muteMentionId}:{}),...(message.assistant_chat_only===true?{assistant_chat_only:true}:{})}});
     this.#save();
   }
   forgetReply(key){this.pendingReplies.delete(key);this.#save();}

@@ -34,6 +34,7 @@ import { readerAccountId, cachedReaderAccount, applyReaderAccount,activeReaderAc
 import {verifyWeChatAccount} from './wechat-account-check.mjs';
 import {createMusicConsole} from './music-console.mjs';
 import {createVoiceConsole} from './voice-console.mjs';
+import {createVoiceDownloads} from './voice-downloads.mjs';
 import {createVoiceComponents} from './voice-components.mjs';
 import {createSpeechPluginConsole} from './speech-plugin-console.mjs';
 import {hostCompatibility} from '../packages/plugin-api/contract.mjs';
@@ -165,6 +166,7 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
     atomic(preferenceFile, { ...previous, pendingApply: true, dshRestartRequired: previous.dshRestartRequired || dsh });
     statusTime = 0;
   };
+  const voiceDownloads=createVoiceDownloads({root,python:()=>snapshot().config.runtime?.python??'python'});
   const voiceComponents=createVoiceComponents({root,pickFile:()=>filePicker?filePicker('zip'):nativeHelper('zip'),python:()=>snapshot().config.runtime?.python??'python'});
   const videoConsole=createVideoConsole({root,describe:async({signal,...input})=>{
     const health=await plugin('/health',undefined,{signal});
@@ -480,6 +482,7 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
       if(req.method==='GET'&&route==='/api/voice-studio/engine')return reply(200,voiceConsole.engine());
       if(req.method==='GET'&&route==='/api/voice-studio/voices')return reply(200,voiceConsole.voices());
       if(req.method==='GET'&&route==='/api/voice-studio')return reply(200,await voiceConsole.snapshot());
+      if(req.method==='GET'&&route==='/api/voice-downloads')return reply(200,voiceDownloads.snapshot());
       if(req.method==='GET'&&route==='/api/voice-components')return reply(200,voiceComponents.snapshot());
       if(req.method==='GET'&&route==='/api/memory/members')return reply(200,memoryView.members(url.searchParams));
       if(req.method==='GET'&&route==='/api/memory/summaries')return reply(200,await memoryView.summaries(url.searchParams));
@@ -602,6 +605,8 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
       assertIdle();
       if(route==='/api/vision-test'){if(!body||body.video!==undefined||typeof body.b64!=='string'||body.b64.length>1050000)throw fault('测试图片过大，请使用768 KiB以内的图片。');const settings=snapshot().config.dsh;const health=await plugin('/health');if(health.visionTest!=='isolated-image-test-v1')throw fault('请从托盘完整退出并重新打开 DSH，以加载图片测试接口。',409);const controller=new AbortController();req.once('aborted',()=>controller.abort());res.once('close',()=>{if(!res.writableEnded)controller.abort();});return reply(200,await plugin('/vision-test',{...body,chatSelection:body.chatSelection??{provider:settings.provider,model:settings.model}},{signal:controller.signal}));}
       const musicAction=/^\/api\/music\/([a-z-]+)$/.exec(route);if(musicAction)return reply(200,await musicConsole.action(musicAction[1],body));
+      if(route==='/api/voice-downloads')return reply(202,voiceDownloads.start(body));
+      if(route==='/api/voice-downloads/cancel')return reply(200,voiceDownloads.cancel());
       if(route==='/api/voice-components/select')return reply(200,await voiceComponents.select());
       if(route==='/api/voice-components/import')return reply(202,voiceComponents.start(body));
       if(route==='/api/plugins/bundle/inspect')return reply(200,pluginBundles.inspect(body));
@@ -848,7 +853,7 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
     };
     listen();
   });
-  server.on('close',()=>{pluginInstaller.dispose();speechChecks.close();});
+  server.on('close',()=>{pluginInstaller.dispose();speechChecks.close();voiceDownloads.cancel();});
   server.once('close',()=>memoryEvaluation.close());
   return { server, shutdown, isBusy: () => shuttingDown || !!activeJob || protectingCredential || processRecoveryBusy || voiceComponents.busy, close: () => { memoryEvaluation.close();server.closeAllConnections(); server.close(); }, start };
 }

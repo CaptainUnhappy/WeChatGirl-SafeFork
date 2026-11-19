@@ -3,7 +3,7 @@ export const BUNDLED_PLUGINS = Object.freeze([
   Object.freeze({id:'cosyvoice-engine',name:'原生肥鱼 CosyVoice3',version:'1.0.1',source:'optional-extensions/cosyvoice-engine',zip:'optional-extensions/packages/cosyvoice-engine-1.0.1.zip'}),
   Object.freeze({id:'memory-evaluation',name:'虚构长对话评测',version:'1.0.1',source:'optional-extensions/memory-evaluation',zip:'optional-extensions/packages/memory-evaluation-1.0.1.zip'}),
   Object.freeze({id:'group-behavior',name:'自然群聊节奏',version:'1.0.1',source:'optional-extensions/group-behavior',zip:'optional-extensions/packages/group-behavior-1.0.1.zip',files:['README.md','plugin.json','index.mjs','lib/policy.mjs']}),
-  Object.freeze({id:'group-mute',essential:true,defaultEnabled:true,name:'群聊闭嘴',version:'1.0.0',source:'optional-extensions/group-mute',zip:'optional-extensions/packages/group-mute-1.0.0.zip'}),
+  Object.freeze({id:'group-mute',essential:true,defaultEnabled:true,name:'群聊闭嘴',version:'1.1.0',source:'optional-extensions/group-mute',zip:'optional-extensions/packages/group-mute-1.1.0.zip'}),
   Object.freeze({id:'local-voice-model',name:'本地声音模型',version:'1.0.0',source:'optional-extensions/local-voice-model',zip:'optional-extensions/packages/local-voice-model-1.0.0.zip'}),
   Object.freeze({id:'memory-retrieval',name:'档案检索助手',version:'1.2.1',source:'optional-extensions/memory-retrieval',zip:'optional-extensions/packages/memory-retrieval-1.2.1.zip'}),
   Object.freeze({id:'memory-events',name:'事件与约定',version:'1.2.1',source:'optional-extensions/memory-events',zip:'optional-extensions/packages/memory-events-1.2.1.zip',files:['README.md','plugin.json','index.mjs','event-policy.mjs']}),

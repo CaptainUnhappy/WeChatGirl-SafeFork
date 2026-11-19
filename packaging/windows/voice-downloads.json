@@ -1,0 +1,60 @@
+{
+  "sensevoice": {
+    "name": "SenseVoice 语音识别（CPU）",
+    "source": "魔搭 ModelScope、阿里云 / 腾讯云 PyPI 镜像",
+    "directory": "state/asr/sensevoice",
+    "license": "https://www.modelscope.cn/models/iic/SenseVoiceSmall",
+    "files": [
+      {
+        "name": "model.int8.onnx",
+        "bytes": 239233841,
+        "sha256": "c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51",
+        "urls": [
+          "https://modelscope.cn/models/WEAAEW/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/master/model.int8.onnx"
+        ]
+      },
+      {
+        "name": "tokens.txt",
+        "bytes": 315894,
+        "sha256": "f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc",
+        "urls": [
+          "https://modelscope.cn/models/WEAAEW/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/master/tokens.txt"
+        ]
+      },
+      {
+        "name": "sherpa_onnx-1.12.34-cp313-cp313-win_amd64.whl",
+        "bytes": 2126382,
+        "sha256": "babdf4be9ef4b0f59b1ad8e8cbebacd1494a963a0a6b1f32f0a28abda86c63fe",
+        "urls": [
+          "https://mirrors.aliyun.com/pypi/packages/08/d6/4d2114b784120e915eff6853096077d2d8b64452e36a10e86eb1d0c15465/sherpa_onnx-1.12.34-cp313-cp313-win_amd64.whl",
+          "https://mirrors.cloud.tencent.com/pypi/packages/08/d6/4d2114b784120e915eff6853096077d2d8b64452e36a10e86eb1d0c15465/sherpa_onnx-1.12.34-cp313-cp313-win_amd64.whl"
+        ]
+      },
+      {
+        "name": "sherpa_onnx_core-1.12.34-py3-none-win_amd64.whl",
+        "bytes": 15037891,
+        "sha256": "ca60ca7fcdd94bcb9c2b3b9fb3a75c73fff58d176d69c0663d59be7cde021f25",
+        "urls": [
+          "https://mirrors.aliyun.com/pypi/packages/f8/25/ddabe254e5dbbcba9bcd6ac737dc7b5574b2737321cf575f2ab36d8677b9/sherpa_onnx_core-1.12.34-py3-none-win_amd64.whl",
+          "https://mirrors.cloud.tencent.com/pypi/packages/f8/25/ddabe254e5dbbcba9bcd6ac737dc7b5574b2737321cf575f2ab36d8677b9/sherpa_onnx_core-1.12.34-py3-none-win_amd64.whl"
+        ]
+      }
+    ]
+  },
+  "breeze": {
+    "name": "Breeze 本地语音合成权重",
+    "source": "HF 镜像（镜像 CDN 线路因地区而异）",
+    "directory": "state/voice/breeze/models",
+    "license": "https://github.com/breezeblue-ai/breeze-tts#license",
+    "files": [
+      {
+        "name": "breeze-tts-2-q8_0.gguf",
+        "bytes": 3568844480,
+        "sha256": "a02bcc4b69b0601032727f8040c4942149b1b73aa0f69022fe5aaa6a8f0ef879",
+        "urls": [
+          "https://hf-mirror.com/HoppouAI/Breeze-TTS-2.cpp/resolve/main/breeze-tts-2-q8_0.gguf"
+        ]
+      }
+    ]
+  }
+}

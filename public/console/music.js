@@ -49,6 +49,34 @@ export function mountVoiceComponentsPanel(element,{api,esc}){
  const host=document.createElement('section');host.className='card voice-components-card';element.prepend(host);
  host.innerHTML='<div class="card-header"><div><h2>语音组件管理</h2><p class="card-description">播放和微信语音编码已在主程序中；大型本地运行环境可在这里导入。</p></div></div><p data-components-status role="status">正在检查组件…</p><div class="button-row"><div class="button-row" data-components-download aria-label="语音组件下载来源" hidden></div><button type="button" class="button primary" data-components-select disabled>选择 ZIP 并导入</button><button type="button" class="button" data-components-refresh>重新检查</button></div><p class="subtle space-top">下载 WeChatGirl-voice-components.zip 后直接选择，无须手动解压。只补充缺少的环境目录，已有目录保留；导入不会修改账号、音色、模型或歌曲。</p><section class="space-top"><h3>导入位置与本地合成条件</h3><p data-components-target class="mono data-location"></p><p class="subtle">这个附件是运行环境包，不包含全部说话、唱歌模型，也不会安装或注册 WSL。导入完成不等于本地语音服务已就绪；下方会列出仍缺少的文件。外接语音 API 可在“语音合成来源”配置，无需导入这个本地环境包。</p><p data-components-models class="card-description"></p></section><p data-components-feedback class="card-description" role="status" aria-live="polite"></p>';
  const $=name=>host.querySelector('[data-components-'+name+']');let timer,busy=false,requesting=false;
+ const models=document.createElement('section');
+ models.className='space-top';
+ models.innerHTML='<h3>按需下载本地模型</h3><p class="subtle">SenseVoice 用于语音消息和视频对白转写。Breeze 下载的是合成权重，仍需单独准备本地合成引擎。翻唱模型继续使用本地配置。</p><label><input type="checkbox"> 我已阅读对应模型的使用条款</label><div data-model-items></div><button type="button" class="button" data-model-cancel hidden>取消下载</button><p role="status" data-model-progress></p>';
+ host.append(models);
+ const items=models.querySelector('[data-model-items]'),progress=models.querySelector('[data-model-progress]'),cancel=models.querySelector('[data-model-cancel]'),consent=models.querySelector('input');
+ let modelTimer,modelItems='',modelRequest=false;
+ async function refreshModels(){
+   clearTimeout(modelTimer);
+   if(!models.isConnected)return;
+   try{
+     const state=await api('/api/voice-downloads'),job=state.job,active=['downloading','installing'].includes(job?.phase);
+     const html=state.items.map(item=>'<p><strong>'+esc(item.name)+'</strong> · '+(item.bytes>=1e9?(item.bytes/1e9).toFixed(2)+' GB':Math.ceil(item.bytes/1e6)+' MB')+' · '+esc(item.source)+' <a href="'+esc(item.license)+'" target="_blank" rel="noopener noreferrer">使用条款</a> <button class="button small" type="button" data-model-id="'+esc(item.id)+'" '+(active||item.exists?'disabled':'')+'>'+(item.exists?'已有本地文件':'下载并安装')+'</button></p>').join('');
+     if(html!==modelItems){items.innerHTML=html;modelItems=html;}
+     cancel.hidden=!active;
+     if(job)progress.textContent=(active?(job.phase==='installing'?'正在安装':'正在下载')+' · '+Math.floor((job.done+job.fileBytes)*100/job.total)+'%':job.message);
+     if(active)modelTimer=setTimeout(refreshModels,1200);
+     if(job?.phase==='complete'&&!modelRequest){modelRequest=true;void refresh();}
+   }catch(error){progress.textContent=error.message;}
+ }
+ items.addEventListener('click',async event=>{
+   const button=event.target.closest('[data-model-id]');if(!button)return;
+   if(!consent.checked){progress.textContent='请先阅读使用条款并勾选确认。';return;}
+   button.disabled=true;
+   try{await api('/api/voice-downloads',{id:button.dataset.modelId,acceptLicense:true});modelRequest=false;void refreshModels();}
+   catch(error){progress.textContent=error.message;button.disabled=false;}
+ });
+ cancel.addEventListener('click',async()=>{try{await api('/api/voice-downloads/cancel',{});void refreshModels();}catch(error){progress.textContent=error.message;}});
+ void refreshModels();
  const phases={starting:'准备校验',validating:'校验发行包',inspecting:'检查归档目录',extracting:'解压到临时目录',installing:'安装缺少的环境',complete:'导入完成',failed:'导入未完成'};
  async function refresh(){
   if(requesting||!host.isConnected)return;requesting=true;clearTimeout(timer);

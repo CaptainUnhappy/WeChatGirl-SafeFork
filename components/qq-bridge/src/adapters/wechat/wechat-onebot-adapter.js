@@ -58,7 +58,7 @@ export class WechatOneBotAdapter extends BaseAdapter {
   async openReceivedVideo(kind,target,id,previousClicks){
     return (await this.server.action('open_received_video',{kind,target,id,previousClicks})).data?.clicked===true;
   }
-  async sendText({ kind, target, text, deliveryId, source, contextId, mention, quoteServerId, receiptOnly }) {
+  async sendText({ kind, target, text, deliveryId, source, contextId, mention, quoteServerId, receiptOnly, muteMentionId }) {
     if (kind !== 'private' && kind !== 'group') throw new TypeError('invalid WeChat kind');
     const content = String(text ?? '').trim();
     if (!content) throw new TypeError('empty WeChat message');
@@ -72,6 +72,7 @@ export class WechatOneBotAdapter extends BaseAdapter {
       ...(mention?{wechatagent_mention:{wxid:mention.wxid,name:mention.name}}:{}),
       ...(quoteServerId!==undefined?{wechatagent_quote_server_id:quoteServerId}:{}),
       ...(receiptOnly?{wechatagent_receipt_only:true}:{}),
+      ...(muteMentionId?{wechatagent_mute_mention_id:muteMentionId}:{}),
       ...(source==='proactive'?{wechatagent_source:'proactive',wechatagent_context_id:contextId}:{}) };
     let result;
     try{result=await this.server.action(action,params);}

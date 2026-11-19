@@ -30,16 +30,36 @@ export function groupMuteState(root,key){
 export const groupMuted=(root,key,now=Date.now())=>(groupMuteState(root,key)?.until??0)>now;
 export const suppressedGroupJob=(root,key,createdAt)=>(groupMuteState(root,key)?.until??0)>=createdAt;
 
+export const validMuteMentionId=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
+export function groupMuteBlocks(state,mentionId,now=Date.now()){
+  return mentionId ? !(state?.mode===1&&state.until>now&&state.id===mentionId) : (state?.until??0)>now;
+}
+export function explicitlyMentionsSelf(message){
+  const segments=message.raw?.message??message.segments;
+  return !message.forwardedRecord&&!message.interaction&&!!message.self_id&&Array.isArray(segments)&&segments.some(part=>
+    part?.type==='at'&&String(part.data?.qq)===String(message.self_id)&&
+    // The reader has no separate recipient list. Its bare suffix match also accepts typed text.
+    (part.data.wechat_text===undefined||part.data.wechat_verified===true));
+}
+
 export function groupMuteCommand(message){
   if(message.kind!=='group'||message.outgoing||message.voice||message.videoId||message.quoteReply||message.forwardedRecord||message.interaction)return null;
   const segments=message.raw?.message??message.segments;
   if(Array.isArray(segments)&&segments.some(part=>part.type!=='text'&&(part.type!=='at'||String(part.data?.qq)!==String(message.self_id))))return null;
-  const text=(Array.isArray(segments)?segments.filter(part=>part.type==='text').map(part=>part.data?.text??'').join(''):String(message.text??'')).trim();
+  let text=(Array.isArray(segments)?segments.filter(part=>part.type==='text').map(part=>part.data?.text??'').join(''):String(message.text??'')).trim();
+  if(Array.isArray(segments)){
+    const mention=segments.find(part=>part.type==='at')?.data?.wechat_text;
+    if(typeof mention==='string'&&mention.startsWith('@')&&mention.length>1){
+      if(text.startsWith(mention+'\u2005'))text=text.slice(mention.length+1).trimStart();
+      else if(text.endsWith(mention))text=text.slice(0,-mention.length).trimEnd();
+    }
+  }
+  if(text==='解除闭嘴')return {action:'resume',strict:true};
   if(/^\/?(?:解除闭嘴|解除静音|开麦)$/.test(text))return {action:'resume'};
-  const match=/^\/?(?:闭嘴|静音)(?:\s*(\d{1,5})\s*(分钟|小时|分|钟头|h|m)?)?$/i.exec(text);
+  const match=/^\/?(?:闭嘴|静音)(?:\s*([12])\s*档)?(?:\s*(\d{1,5})\s*(分钟|小时|分|钟头|h|m)?)?$/i.exec(text);
   if(!match)return null;
-  const minutes=match[1]===undefined?undefined:Number(match[1])*(/^(?:小时|钟头|h)$/i.test(match[2]??'')?60:1);
-  return {action:'mute',minutes};
+  const minutes=match[2]===undefined?undefined:Number(match[2])*(/^(?:小时|钟头|h)$/i.test(match[3]??'')?60:1);
+  return {action:'mute',minutes,...(match[1]?{mode:Number(match[1])}:{})};
 }
 
 export class GroupMute {
@@ -58,13 +78,27 @@ export class GroupMute {
     const commandId=digest(key+'\0'+String(message.message_id));
     if(!message.message_id||previous?.commandId===commandId||previous&&Number(message.timestamp)*1000<Math.floor(previous.since/1000)*1000)return true;
     if(command.action==='resume'){
-      if(previous?.until>now)this.write(key,{...previous,until:now,commandId});
+      if(previous?.mode===2&&!command.strict)return true;
+      if(previous?.until>now){
+        this.write(key,{...previous,until:now,commandId});
+        this.log('[GroupMute] resumed');
+      }
+      return true;
+    }
+    if(previous?.mode===2&&previous.until>now)return true;
+    const mode=command.mode??(command.minutes===undefined&&settings.defaultMode==='二档 · 完全静音'?2:1);
+    if(mode===2){
+      if(command.minutes!==undefined)return true;
+      this.write(key,{key,id:commandId,commandId,since:now,until:Number.MAX_SAFE_INTEGER,mode,notice:'pending'});
+      this.onMute(key);
+      this.log('[GroupMute] muted mode=2');
       return true;
     }
     const limit=settings.maxMinutes??120,minutes=command.minutes??Math.min(settings.defaultMinutes??15,limit);
     if(!Number.isSafeInteger(minutes)||minutes<1||minutes>limit||minutes>1440)return true;
-    this.write(key,{key,id:commandId,commandId,since:now,until:now+minutes*60000,notice:'pending'});
+    this.write(key,{key,id:commandId,commandId,since:now,until:now+minutes*60000,mode,notice:'pending'});
     this.onMute(key);
+    this.log('[GroupMute] muted minutes='+minutes);
     return true;
   }
   async tick(){

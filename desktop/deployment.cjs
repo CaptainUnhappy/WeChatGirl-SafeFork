@@ -17,6 +17,9 @@ async function bootstrapDeployment(resourcesPath, dataHome, progress = () => {},
   const firstInstall = !fs.existsSync(path.join(workspace,'config/wechatagent.json'));
   const previousDistribution=path.join(workspace,'config/distribution.json');
   const previousSettings=fs.existsSync(previousDistribution)?JSON.parse(fs.readFileSync(previousDistribution,'utf8').replace(/^\uFEFF/,'')):{};
+  const bundledPlugins=new Set(Array.isArray(previousSettings.bundledPlugins)?previousSettings.bundledPlugins:[]);
+  const includesAll=manifest.pluginDistribution==='all';
+  const bundledIds=includesAll?manifest.bundledPlugins:manifest.essentialPlugins;
   const defaultPlugins=new Set(Array.isArray(previousSettings.defaultPlugins)?previousSettings.defaultPlugins:[]);
   const externalDshHome=options.externalDshHome || previousSettings.externalDshHome || process.env.DSH_HOME || path.join(require('node:os').homedir(),'.dsh');
   const dshHome=options.dshHome || previousSettings.dshHome || (dshBundled && !fs.existsSync(path.join(workspace,'config/wechatagent.json')) ? path.join(dataHome,'dsh') : externalDshHome);
@@ -91,7 +94,7 @@ async function bootstrapDeployment(resourcesPath, dataHome, progress = () => {},
     config.hook={...config.hook,expectedVersion:wechatVersion,wechatExecutable:path.relative(workspace,path.join(client,'Weixin.exe'))};
     fs.writeFileSync(configFile, JSON.stringify(config, null, 2) + '\n');
   }
-  if(Array.isArray(manifest.essentialPlugins)&&manifest.essentialPlugins.length){
+  if(Array.isArray(bundledIds)&&bundledIds.length){
     progress('正在准备基础插件…');
     const {pathToFileURL}=require('node:url');
     const {PluginInstaller}=await import(pathToFileURL(path.join(workspace,'packages/plugin-api/installer.mjs')).href);
@@ -99,13 +102,28 @@ async function bootstrapDeployment(resourcesPath, dataHome, progress = () => {},
     const {updatePlugin}=await import(pathToFileURL(path.join(workspace,'packages/plugin-api/catalog.mjs')).href);
     const installer=new PluginInstaller(workspace);
     try{
-      for(const id of manifest.essentialPlugins){
-        const bundle=BUNDLED_PLUGINS.find(b=>b.id===id&&b.essential&&b.zip);
+      for(const id of bundledIds){
+        const bundle=BUNDLED_PLUGINS.find(b=>b.id===id&&(includesAll||b.essential)&&b.zip);
         if(!bundle)throw Error('基础插件登记无效。');
-        if(bundle.defaultEnabled&&defaultPlugins.has(id)||!firstInstall&&!bundle.defaultEnabled)continue;
-        if(fs.existsSync(path.join(workspace,'plugins',id))){if(bundle.defaultEnabled)defaultPlugins.add(id);continue;}
+        if(id==='group-mute'&&bundle.version==='1.1.0'){
+          // Upgrade only the original built-in manifest. Keep its permissions, chat scope and enabled state.
+          const pluginDir=path.join(workspace,'plugins',id),target=path.join(pluginDir,'plugin.json');
+          if(fs.existsSync(target)&&[path.dirname(pluginDir),pluginDir,target].every(file=>!fs.lstatSync(file).isSymbolicLink())&&
+            fs.statSync(target).isFile()&&fs.statSync(target).size<65536&&
+            crypto.createHash('sha256').update(fs.readFileSync(target)).digest('hex')==='af78287b2d8cbd528865fb25ad743c659abc9c4c4bbb85020ee8f50d6a0820da'){
+            const {unpackZip}=await import(pathToFileURL(path.join(workspace,'packages/plugin-api/zip.mjs')).href);
+            const updated=unpackZip(fs.readFileSync(path.join(workspace,bundle.zip))).find(file=>file.name==='plugin.json');
+            if(!updated)throw Error('群聊闭嘴插件清单缺失。');
+            const staging=target+'.'+crypto.randomUUID()+'.tmp';
+            try{fs.writeFileSync(staging,updated.data,{flag:'wx'});fs.renameSync(staging,target);}
+            finally{if(fs.existsSync(staging))fs.unlinkSync(staging);}
+          }
+        }
+        if(bundledPlugins.has(id)||bundle.defaultEnabled&&defaultPlugins.has(id)||!includesAll&&!firstInstall&&!bundle.defaultEnabled)continue;
+        if(fs.existsSync(path.join(workspace,'plugins',id))){bundledPlugins.add(id);if(bundle.defaultEnabled)defaultPlugins.add(id);continue;}
         const preview=installer.inspect({name:id+'.zip',zip:fs.readFileSync(path.join(workspace,bundle.zip)).toString('base64')});
         const installed=installer.install({ticket:preview.ticket,revision:preview.revision});
+        bundledPlugins.add(id);
         if(bundle.defaultEnabled){
           updatePlugin(workspace,id,{revision:installed.revision,enabled:true,permissions:[],chats:null,settings:{}});
           defaultPlugins.add(id);
@@ -126,7 +144,7 @@ async function bootstrapDeployment(resourcesPath, dataHome, progress = () => {},
       fs.writeFileSync(pendingFile,JSON.stringify({...pending,pendingApply:true,dshRestartRequired:true},null,2));
     }
   }
-  fs.writeFileSync(distributionFile, JSON.stringify({ version: manifest.version, buildId:manifest.buildId, runtimeRevision:manifest.runtimeRevision, installed: true, dataHome, python, node, dshBundled, dsh, dshHome, externalDshHome, assets: resourcesPath, defaultPlugins:[...defaultPlugins] }, null, 2));
+  fs.writeFileSync(distributionFile, JSON.stringify({ version: manifest.version, buildId:manifest.buildId, runtimeRevision:manifest.runtimeRevision, installed: true, dataHome, python, node, dshBundled, dsh, dshHome, externalDshHome, assets: resourcesPath, defaultPlugins:[...defaultPlugins],bundledPlugins:[...bundledPlugins] }, null, 2));
   progress('本机运行环境已准备，正在打开控制台…');
   return { root: workspace, node, python, dataHome, version: manifest.version };
 }

@@ -19,7 +19,7 @@
 
 ### 使用本机 SenseVoice
 
-已安装本机组件时，选择「本机 SenseVoice（CPU）」并点击「检测配置」。测试会实际转写内置短句。随后启用插件，授予语音读取权限，按聊天授权。WAV 在本机处理，DSH 只接收转写文字。
+先在「语音音色 → 语音组件管理」下载 SenseVoice 语音识别（CPU），约 257 MB。模型来自魔搭，运行库从阿里云或腾讯云 PyPI 镜像获取；下载后会校验文件。已安装本机组件时，选择「本机 SenseVoice（CPU）」并点击「检测配置」。测试会实际转写内置短句。随后启用插件，授予语音读取权限，按聊天授权。WAV 在本机处理，DSH 只接收转写文字。
 
 手动准备时，使用与宿主相同版本的 Windows x64 Python。将 sherpa-onnx 1.12.34 安装到工作区的 `state/asr/sensevoice/site`，将官方量化模型包的 `model.int8.onnx` 和 `tokens.txt` 放到 `state/asr/sensevoice/`。模型和依赖单独准备。 [SenseVoice 模型下载与说明](https://k2-fsa.github.io/sherpa/onnx/sense-voice/pretrained.html)
 
