@@ -106,6 +106,7 @@ export class MessageBuffer {
       ...(!outgoing&&/^[a-f0-9]{64}$/.test(message.videoId??'')?{videoId:message.videoId}:{}),
       ...(!outgoing&&message.videoId&&typeof message.videoObservation==='string'?{videoObservation:message.videoObservation.slice(0,8800),videoRevision:message.videoRevision}:{}),
       files:outgoing?[]:(message.files??[]).filter(file=>/^[a-f0-9]{64}$/.test(file?.id??'')&&typeof file.name==='string'&&file.name.length<=180&&Number.isSafeInteger(file.size)&&file.size>=0&&file.size<=50*1024*1024).slice(0,3),
+      ...(!outgoing&&message.kind==='group'&&['self','other'].includes(message.groupAt)?{groupAt:message.groupAt}:{}),
       direct_mention: Boolean(message.direct_mention), outgoing, processed: outgoing||processed };
     if(!outgoing && message.interaction==='pat')row.interaction='pat';
     const record=!outgoing && normalizeForwardedRecord(message.forwardedRecord);

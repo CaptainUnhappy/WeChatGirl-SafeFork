@@ -1,9 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import {setTimeout as delay} from 'node:timers/promises';
 import {boundedTask} from './deadline.mjs';
 
-export async function imageBlocks(ctx,root,conversationKey,images,provider,model,{onUnavailable,timeoutMs=60000,signal:parentSignal,fallback,fetchImpl=fetch}={}) {
+export async function imageBlocks(ctx,root,conversationKey,images,provider,model,{onUnavailable,timeoutMs=65000,signal:parentSignal,fallback,fetchImpl=fetch,thumbnailWaitMs=1200}={}) {
   if (!Array.isArray(images) || images.length>4) throw new Error('IMAGE_BATCH_LIMIT');
   if (!images.length) return [];
   if (images.some(image=>!/^[a-f0-9]{64}$/.test(image?.id ?? ''))) throw new Error('INVALID_IMAGE_REFERENCE');
@@ -15,8 +16,18 @@ export async function imageBlocks(ctx,root,conversationKey,images,provider,model
     // Reject the image itself on binding/integrity/format failures too. Never
     // admit its bytes, and never leave that bad input at the head of the chat.
     const safeCode=/^(?:(?:IMAGE|VISION)_[A-Z_]+|INVALID_IMAGE_DATA|MODEL_IMAGE_INPUT_UNSUPPORTED)$/.test(error.message)?error.message:'IMAGE_READER_NOT_READY';
-    onUnavailable({id:image.id,index,code:error.imageError??(error.name==='TimeoutError'||error.name==='AbortError'?'IMAGE_PROCESS_TIMEOUT':safeCode)});
-    return {type:'text',text:`[本轮附图 I${index+1} 未能读取或解析，未提供画面；不要猜测内容。其余成功附图仍可使用。]`};
+    const code=error.imageError??(error.name==='TimeoutError'||error.name==='AbortError'?'IMAGE_PROCESS_TIMEOUT':safeCode);
+    onUnavailable({id:image.id,index,code});
+    const reason={
+      IMAGE_LOCAL_COPY_UNAVAILABLE:'电脑微信未缓存可读取的图片。请在电脑微信打开图片，或请发送方选择原图重发。',
+      MODEL_IMAGE_INPUT_UNSUPPORTED:'当前聊天模型不支持看图，且没有可用的备用识图模型。',
+      VISION_SELECTED_MODEL_UNSUPPORTED:'所选备用模型不支持图片输入，请重新选择。',
+      VISION_MODEL_UNAVAILABLE:'没有找到可用的备用识图模型，请在设置中选择并测试。',
+      VISION_PARSE_TIMEOUT:'识图模型处理超时，未能取得解析结果。',
+      VISION_FALLBACK_DISABLED:'当前模型不能看图，图片分流未开启。',
+      IMAGE_PROCESS_TIMEOUT:'读取图片超时，图片清晰度无法判断。',
+    }[code]??'当前没有取得图片，无法判断清晰度。';
+    return {type:'text',text:`[本轮附图 I${index+1} 没有可用画面。${reason}回复只说明实际障碍，不判断未收到图片的清晰度。其余成功附图仍可使用。]`};
   };
   let info;
   try{info=await boundedTask(s=>llm.resolveModelInfo(provider,model,s),{timeoutMs:Math.min(timeoutMs,8000),signal});}
@@ -27,9 +38,7 @@ export async function imageBlocks(ctx,root,conversationKey,images,provider,model
   const base=new URL(io.reader_base_url);
   if (base.protocol!=='http:' || base.hostname!=='127.0.0.1' || base.username || base.password || base.pathname!=='/' || base.search || base.hash) throw new Error('IMAGE_READER_LOOPBACK_REQUIRED');
   const blocks=new Array(images.length);let next=0;
-  async function prepare(image,index) {
-    try {
-    return await boundedTask(async taskSignal=>{
+  async function readImage(image,taskSignal){
     const response=await fetchImpl(base.origin+'/api/v1/images/'+image.id,{headers:{Authorization:'Bearer '+io.reader_token},redirect:'error',signal:taskSignal});
     if (!response.ok) {
       const failure = await response.json().catch(() => ({}));
@@ -42,17 +51,33 @@ export async function imageBlocks(ctx,root,conversationKey,images,provider,model
     if (typeof content.b64!=='string' || content.b64.length>1100000 || !['image/png','image/jpeg','image/webp'].includes(content.mime)) throw new Error('INVALID_IMAGE_DATA');
     const data=Buffer.from(content.b64,'base64');
     if (!data.length || data.length>768*1024 || data.toString('base64')!==content.b64 || crypto.createHash('sha256').update(data).digest('hex')!==content.sha256) throw new Error('IMAGE_INTEGRITY_FAILED');
+    return {...content,data};
+  }
+  async function prepare(image,index) {
+    try {
+    return await boundedTask(async taskSignal=>{
+    let content=await readImage(image,taskSignal);
+    if(content.sourceQuality==='thumbnail'){
+      try{
+        await delay(thumbnailWaitMs,undefined,{signal:taskSignal});
+        const refreshed=await boundedTask(retrySignal=>readImage(image,retrySignal),{timeoutMs:2400,signal:taskSignal});
+        if(refreshed.sourceQuality==='full')content=refreshed;
+      }catch(error){if(taskSignal.aborted)throw error;}
+    }
+    const {data}=content;
+    const size=[content.width,content.height].every(n=>Number.isSafeInteger(n)&&n>0&&n<=4096)?'，送入画面的尺寸 '+content.width+'×'+content.height+' 像素':'';
+    const sourceNote=content.sourceQuality==='thumbnail'?'当前是微信缓存的预览图'+size+'。请照常说明确实可辨认的内容；只标明看不清的具体细节。若所问细节确实不可辨认，再请发送方选择原图重发。':'';
     if(needsFallback){
       const description=await fallback.describe({key:conversationKey,id:image.id,index,data,mime:content.mime,sourceQuality:content.sourceQuality,preferred:{provider,model},signal:taskSignal});
       const safe=String(description).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      return {type:'text',text:`[图片 I${index+1} 的独立解析结果，仅作为本轮参考：\n${safe}]`};
+      return {type:'text',text:`[图片 I${index+1} 的独立解析结果，仅作为本轮参考。${sourceNote}\n${safe}]`};
     }
     const attachment=await attachments.saveImage({data,mediaType:content.mime,name:'wechat-image-'+image.id.slice(0,12)});
     const block={type:'image',attachment};
     return content.sourceQuality==='thumbnail' ? [
-      {type:'text',text:`[附图 I${index+1} 当前仅提供微信本地缩略图，细节和小字可能不清楚；不要把低清画面当作原图或猜测看不清的内容。需要细节时请用户先在电脑微信打开原图，再重新发送图片。]`},block,
+      {type:'text',text:`[附图 I${index+1}：${sourceNote}]`},block,
     ] : block;
-    },{timeoutMs:needsFallback?55000:12000,signal});
+    },{timeoutMs:needsFallback?63000:16000,signal});
     } catch(error) {
       return unavailableBlock(image,index,error);
     }

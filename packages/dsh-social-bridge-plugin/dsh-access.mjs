@@ -19,7 +19,7 @@ export async function dshCatalog(ctx,{scope,cwd,signal,workMode='social',include
 }
 export function bindDshAccess(agentCtx,ctx,agent,root,key,turnFor,{isAllowed=()=>true}={}){
   const boundMode=readPolicy(root,key).workMode??'social';
-  const active=()=>{const turn=turnFor(),policy=readPolicy(root,key,turn?.actorId);return !!turn&&(boundMode==='assistant'||!turn.networkOptOut)&&!turn.controller.signal.aborted&&isAllowed()&&(policy.workMode??'social')===boundMode&&(boundMode==='assistant'||policy.chatExecution===true&&policy.administrator);};
+  const active=()=>{const turn=turnFor(),policy=readPolicy(root,key,turn?.actorId);return !!turn&&(boundMode==='assistant'||turn.explicitTask===true&&!turn.networkOptOut)&&!turn.controller.signal.aborted&&isAllowed()&&(policy.workMode??'social')===boundMode&&(boundMode==='assistant'||policy.chatExecution===true&&policy.administrator);};
   const access=()=>active()?readPolicy(root,key):{skills:[],tools:[]};
   const executionMode=()=>boundMode==='assistant'||access().chatExecution===true?'assistant':'social';
   const native=()=>boundMode==='assistant'&&access().mode==='native';

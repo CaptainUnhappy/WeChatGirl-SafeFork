@@ -36,14 +36,14 @@ export function groupMuteBlocks(state,mentionId,now=Date.now()){
 }
 export function explicitlyMentionsSelf(message){
   const segments=message.raw?.message??message.segments;
-  return !message.forwardedRecord&&!message.interaction&&!!message.self_id&&Array.isArray(segments)&&segments.some(part=>
+  return message.groupAt!=='other'&&!message.forwardedRecord&&!message.interaction&&!!message.self_id&&Array.isArray(segments)&&segments.some(part=>
     part?.type==='at'&&String(part.data?.qq)===String(message.self_id)&&
-    // The reader has no separate recipient list. Its bare suffix match also accepts typed text.
+    // A typed suffix is supported for commands but does not count as a native alert.
     (part.data.wechat_text===undefined||part.data.wechat_verified===true));
 }
 
 export function groupMuteCommand(message){
-  if(message.kind!=='group'||message.outgoing||message.voice||message.videoId||message.quoteReply||message.forwardedRecord||message.interaction)return null;
+  if(message.kind!=='group'||message.groupAt==='other'||message.outgoing||message.voice||message.videoId||message.quoteReply||message.forwardedRecord||message.interaction)return null;
   const segments=message.raw?.message??message.segments;
   if(Array.isArray(segments)&&segments.some(part=>part.type!=='text'&&(part.type!=='at'||String(part.data?.qq)!==String(message.self_id))))return null;
   let text=(Array.isArray(segments)?segments.filter(part=>part.type==='text').map(part=>part.data?.text??'').join(''):String(message.text??'')).trim();

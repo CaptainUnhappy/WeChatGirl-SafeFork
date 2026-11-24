@@ -46,11 +46,11 @@ export async function synthesizeVoice(root,request,settings,{signal,fetcher=fetc
   if(profile&&(profile.volume!==undefined&&profile.volume!==1||profile.bassDb||profile.trebleDb||profile.normalize||profile.trimSilence))pcm=await wavToPcm(root,pcmToWav(pcm),{signal,volume:profile.volume??1,bassDb:profile.bassDb??0,trebleDb:profile.trebleDb??0,normalize:profile.normalize??false,trimSilence:profile.trimSilence??false});
   if(signal?.aborted)throw voiceError('VOICE_CANCELLED');
   if(previewOnly)return pcm;
-  onPcm?.(pcm);onProgress('encode');const pieces=request.kind==='song'?splitSongPcm(pcm,request.playbackMode):[pcm],proofs=[];
+  onPcm?.(pcm);onProgress('encode');const pieces=request.kind==='song'||request.kind==='original'?splitSongPcm(pcm,request.playbackMode??'full'):[pcm],proofs=[];
   for(const part of pieces){const result=await encode(part,24000),data=Buffer.from(result.data),durationMs=Math.round(result.duration);
   if(data[0]!==2||data.subarray(1,10).toString()!=='#!SILK_V3'||durationMs<20||durationMs>60000||data.length>1024*1024)throw voiceError('VOICE_CODEC_INVALID');
   const md5=crypto.createHash('md5').update(data).digest('hex'),outgoing=directory(root,'state/voice/outgoing'),file=path.join(outgoing,md5+'.silk');
   if(fs.existsSync(file)&&fs.lstatSync(file).isSymbolicLink())throw voiceError('VOICE_OUTPUT_INVALID');fs.writeFileSync(file,data,{mode:0o600});const proof={md5,size:data.length,durationMs};if(request.kind==='song'){onProgress('save');const entry=saved.save(request,settings,proof,part,{...preparedSong,segmentIndex:proofs.length,segmentCount:pieces.length,seriesId:crypto.createHash('sha256').update(pcm).digest('hex')},signal);proofs.push({...proof,savedSongId:entry.id,cached:false});}else proofs.push(proof);}
   if(request.kind==='song')try{new MusicLibrary(root).enforceLimit({protectIds:proofs.map(p=>p.savedSongId)});}catch{onProgress('save');}
-  return {...proofs[0],...(request.kind==='song'?{playbackMode:request.playbackMode,segmentIndex:0,segmentProofs:proofs}: {})};
+  return {...proofs[0],...(['song','original'].includes(request.kind)?{playbackMode:request.playbackMode??'full',segmentIndex:0,segmentProofs:proofs}: {})};
 }

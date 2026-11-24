@@ -17,7 +17,7 @@ function runtimeModules(folder,prefix='packages/plugin-api'){
 export async function auditPluginHost(root,{compareRoot,requireZips=true}={}){
   root=path.resolve(root);const findings=[],packages=[];
   const problem=(file,code)=>findings.push({file,code});
-  let core=false;try{core=JSON.parse(fs.readFileSync(path.join(root,'deployment.json'),'utf8')).pluginDistribution==='core';}catch{}
+  let core=false;try{core=!fs.existsSync(path.join(root,'.git'))&&JSON.parse(fs.readFileSync(path.join(root,'deployment.json'),'utf8')).pluginDistribution==='core';}catch{}
   const read=relative=>fs.readFileSync(path.join(root,relative));
   let contract,catalog,bundled,uiCatalog;
   try{

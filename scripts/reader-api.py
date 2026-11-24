@@ -148,6 +148,28 @@ def conversation_id(talker, names):
     return onebot_id(identity)
 
 
+def mention_recipients(source):
+    # Read recipients only from the separate message source column, never from the chat text.
+    if isinstance(source, bytes):
+        source = source.decode('utf-8', errors='ignore')
+    if not isinstance(source, str) or len(source) > 8192:
+        return None
+    source = source.strip().strip('\x00')
+    try:
+        root = safe_xml(source)
+    except (ValueError, ET.ParseError, RecursionError):
+        return None
+    if root.tag != 'msgsource':
+        return None
+    value = root.findtext('atuserlist')
+    if value is None:
+        return None
+    recipients = [item.strip() for item in value.split(',') if item.strip()]
+    if not recipients or len(recipients) > 100 or not all(re.fullmatch(r'[A-Za-z0-9_@-]{1,128}', item) for item in recipients):
+        return None
+    return list(dict.fromkeys(recipients))
+
+
 def push_payload(talker, message, names, own_wxid, identity=None):
     sender = message.get('senderUsername', '')
     if message.get('isSend'):
@@ -192,6 +214,7 @@ def push_payload(talker, message, names, own_wxid, identity=None):
         'groupName': names.get(talker, talker) if group else '',
         'sourceName': names.get(sender, sender) if group else names.get(talker, talker),
         'senderName': names.get(sender, sender), 'talkerId': sender,
+        **({'mentionWxids': message['mentionWxids']} if group and message.get('mentionWxids') else {}),
         'content': content[:4000], 'type': FILE_TYPE if file_info else 47 if sticker else kind, 'timestamp': message.get('createTime', 0),
         **({'file': file_info} if file_info else {}),
         **({'voice': {**voice, 'localId': message.get('localId'), 'serverId': str(message.get('serverId') or '0'), 'createTime': message.get('createTime')}} if voice else {}),
@@ -424,17 +447,27 @@ class Reader:
                 raise RuntimeError('Message query did not cover every readable shard')
             # Preserve complete text: the upstream CLI display truncates to 200.
             table = 'Msg_' + hashlib.md5(talker.encode()).hexdigest()
+            mention_columns = {}
             for message in data.get('messages', []):
                 if message.get('localType') not in (1, 3, 34, *VIDEO_TYPES, PAT_TYPE, 49, *ARTICLE_CARD_TYPES, FORWARD_TYPE, QUOTE_TYPE, 47, APPMSG_STICKER_TYPE, FILE_TYPE):
                     continue
                 for connection in connections:
                     if table not in nt.msg_tables(connection):
                         continue
-                    row = connection.execute('SELECT message_content FROM "' + table +
+                    source_column = None
+                    if '@chatroom' in talker and message.get('localType') in (1, 49, QUOTE_TYPE):
+                        if connection not in mention_columns:
+                            columns = {item[1].lower() for item in connection.execute('PRAGMA table_info("' + table + '")')}
+                            mention_columns[connection] = next((key for key in ('message_source', 'msg_source', 'source') if key in columns), None)
+                        source_column = mention_columns[connection]
+                    extra = ',substr("' + source_column + '",1,8193)' if source_column else ''
+                    row = connection.execute('SELECT message_content' + extra + ' FROM "' + table +
                         '" WHERE local_id=? AND create_time=? AND server_id=? LIMIT 1',
                         (message['localId'], message['createTime'], message['serverId'] or 0)).fetchone()
                     if row:
                         text = nt._decode_content(row[0])
+                        if source_column and (recipients := mention_recipients(row[1])):
+                            message['mentionWxids'] = recipients
                         if message.get('localType') in VIDEO_TYPES:
                             packed = None
                             columns = {item[1].lower() for item in connection.execute('PRAGMA table_info("' + table + '")')}

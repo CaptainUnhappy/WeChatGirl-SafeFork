@@ -36,7 +36,7 @@ function fixture(t){
  fs.mkdirSync(path.join(root,'config'));
  const config={persona:{default:'test',chats:{}},wechat:{whitelist:{private:['123'],groups:[]},assistant:{administrators:['wxid_owner']},workModes:{[key]:'social'},dshAccess:{chats:{[key]:{skills:['office'],tools:['read','pwsh'],chatExecution:true,toolLimit:10}}}}};
  const save=()=>fs.writeFileSync(path.join(root,'config/wechatagent.json'),JSON.stringify(config));save();
- let turn={actorId:'wxid_owner',controller:new AbortController(),toolCalls:0,skillCalls:0},registered;
+ let turn={explicitTask:true,actorId:'wxid_owner',controller:new AbortController(),toolCalls:0,skillCalls:0},registered;
  const agentCtx={tools:{register:value=>{registered=value;return ()=>{};}}},agent={session:{header:{cwd:root}}};
  const services={tools:{schemas:()=>['read','write','pwsh','task_board_list'].map(name=>({name}))},skills:{get:async name=>({name,content:'Office instructions'})}};
  const binding=bindDshAccess(agentCtx,{get:name=>services[name]},agent,root,key,()=>turn);
@@ -47,6 +47,7 @@ test('chat execution exposes only explicitly granted tools to the trusted admini
  const f=fixture(t);assert.deepEqual([...f.policy.names()].sort(),['pwsh','read','skill']);assert(f.policy.check('read'));assert(!f.policy.check('write'));
  assert.match(await f.binding.instructions(),/聊天模式 DSH 授权/);
  const value=await f.loader().execute({name:'office'});assert.match(value.content,/Office instructions/);
+ f.turn.explicitTask=false;assert.equal(f.policy.names().size,0);f.turn.explicitTask=true;
  f.turn.actorId='wxid_guest';assert.equal(f.policy.names().size,0);assert(!f.policy.check('read'));await assert.rejects(f.loader().execute({name:'office'}),/NOT_ALLOWED/);
  f.turn.actorId='';assert.equal(f.policy.names().size,0);
 });
@@ -78,4 +79,20 @@ test('mixed, forged or missing senders cannot inherit the administrator identity
  assert.equal(verifiedBatchSender([row('wxid_owner'),row('wxid_guest')]),'');
  assert.equal(verifiedBatchSender([row('wxid_owner'),{...row('wxid_guest'),sender_wxid:'wxid_owner'}]),'');
  assert.equal(verifiedBatchSender([row('wxid_owner'),{}]),'');assert.equal(verifiedBatchSender([]),'');
+});
+
+test('direct chat commands can follow a group mention; quoted and indirect text never becomes a DSH command',async()=>{
+ const {chatDshTask}=await import('../components/qq-bridge/src/core/social-engine.js');
+ const {capabilityCopy,renderCatalogOptions}=await import('../public/console/dsh-catalog.mjs');
+ const row={kind:'group',text:'@鲸鱼娘\u2005帮我叫 DSH 整理这份资料'};
+ assert.equal(chatDshTask(row,['鲸鱼娘']),'整理这份资料');
+ assert.equal(chatDshTask({text:'/dsh：查看任务清单'}),'查看任务清单');
+ assert.equal(chatDshTask({...row,forwardedRecord:{}}), '');
+ assert.equal(chatDshTask({text:'我昨天说了：帮我叫 DSH 整理资料'}),'');
+ assert.equal(capabilityCopy({name:'read',description:'Read files'},'tools','builtin').title,'读取文件');
+ assert.equal(capabilityCopy({name:'read',description:'Third party operation'},'tools','plugin').title,'read');
+ assert.equal(capabilityCopy({name:'meme_update',description:'修改标签'},'tools','plugin','dsh-meme').title,'整理表情库标签');
+ assert.equal(capabilityCopy({name:'meme_update',description:'Different operation'},'tools','plugin','other').title,'meme_update');
+ const html=renderCatalogOptions({tools:[{name:'read',sourceId:'core',description:'Read files'}],plugins:[{id:'core',kind:'builtin'}]},{tools:['read'],skills:[]},{tools:[],skills:[]},String);
+ assert.match(html,/读取文件/);assert.match(html,/value="read" checked/);
 });

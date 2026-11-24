@@ -1,6 +1,7 @@
 import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import {spawn} from 'node:child_process';
 import {directory,atomicJson} from '../plugin-api/catalog.mjs';import {voiceError} from './jobs.mjs';
 import {songRenderSignature} from './saved-songs.mjs';
+import {composeOriginal,mixOriginalBacking} from './original.mjs';
 import {prepareSong,mixSong} from './music.mjs';
 export function pcmToWav(pcm){const header=Buffer.alloc(44);header.write('RIFF');header.writeUInt32LE(36+pcm.length,4);header.write('WAVEfmt ',8);header.writeUInt32LE(16,16);header.writeUInt16LE(1,20);header.writeUInt16LE(1,22);header.writeUInt32LE(24000,24);header.writeUInt32LE(48000,28);header.writeUInt16LE(2,32);header.writeUInt16LE(16,34);header.write('data',36);header.writeUInt32LE(pcm.length,40);return Buffer.concat([header,pcm]);}
 export async function wavToPcm(root,wav,{signal,pitchSemitones=0,speed=1,volume=1,bassDb=0,trebleDb=0,normalize=false,trimSilence=false,lightVoice=false,maxSeconds=60}={}){
@@ -26,7 +27,8 @@ export async function convertSongPcm(pcm,convert,{signal,onProgress=()=>{}}={}){
   for(let offset=0;offset<pcm.length;offset+=core){signal?.throwIfAborted();const end=Math.min(offset+core,pcm.length),start=Math.max(0,offset-context),stop=Math.min(pcm.length,end+context);onProgress('conversion',{part:parts.length+1,parts:Math.ceil(pcm.length/core)});const input=pcm.subarray(start,stop),converted=await convert(input,parts.length);signal?.throwIfAborted();if(!Buffer.isBuffer(converted)||converted.length%2||Math.abs(converted.length-input.length)>48000)throw voiceError('SONG_CONVERSION_ALIGNMENT_FAILED');const normalized=Buffer.alloc(input.length);converted.copy(normalized,0,0,Math.min(converted.length,normalized.length));parts.push(normalized.subarray(offset-start,end-start));}
   return Buffer.concat(parts);
 }
-export async function synthesizeSinging(root,request,{signal,fetcher=fetch,remoteJobId,onRemoteJob=()=>{},sourceWav,onProgress=()=>{},onPreparedSong=()=>{},mixSettings={},prepare=prepareSong}={}){
+export async function synthesizeSinging(root,request,{signal,fetcher=fetch,remoteJobId,onRemoteJob=()=>{},sourceWav,onProgress=()=>{},onPreparedSong=()=>{},mixSettings={},prepare=prepareSong,resample=wavToPcm}={}){
+  const original=request.kind==='original'?composeOriginal(request):null;
   let song;
   if(request.kind==='song'){song=await prepare(root,request,{signal,fetcher,onProgress});onPreparedSong(song);sourceWav=fs.readFileSync(path.join(song.folder,'vocals.wav'));}
   onProgress('conversion');
@@ -55,15 +57,19 @@ export async function synthesizeSinging(root,request,{signal,fetcher=fetch,remot
     onProgress('mix');return mixSong(root,pcm,song,{signal,clarity:mixSettings.singingClarity!==false,backingVolume:mixSettings.backingVolume??0.4});
   }
   let id=remoteJobId;
-  if(!id){const capabilities=await json('/v1/capabilities');if(request.kind==='score'&&capabilities.singing?.available!==true)throw voiceError('SINGING_SCORE_ENGINE_NOT_READY');
+  if(!id){const capabilities=await json('/v1/capabilities');if((request.kind==='score'||original)&&capabilities.singing?.available!==true)throw voiceError('SINGING_SCORE_ENGINE_NOT_READY');
     let job;if(request.kind==='cover'||sourceWav){
       let audio=sourceWav;if(!audio){const songs=directory(root,'state/voice/songs'),file=path.join(songs,request.songId+'.wav');if(!fs.existsSync(file)||fs.lstatSync(file).isSymbolicLink()||fs.statSync(file).size>140*1024*1024)throw voiceError('SINGING_SONG_NOT_PREPARED');audio=fs.readFileSync(file);}
       const audioId=await upload(audio,'vocal.wav','audio/wav');job=await json('/v1/voice-conversion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({voice:'feiyu',audio_id:audioId})});
-    }else{const scoreId=await upload(request.score,'score.abc','text/vnd.abc');job=await json('/v1/singing',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({voice:'feiyu',score_id:scoreId,lyrics:request.lyrics,segment_seconds:20})});}
+    }else{const scoreId=await upload(original?.score??request.score,'score.abc','text/vnd.abc');job=await json('/v1/singing',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({voice:'feiyu',score_id:scoreId,lyrics:original?.lyrics??request.lyrics,segment_seconds:original?5:20})});}
     id=job.id;if(!/^[a-f0-9]{32}$/.test(id??''))throw voiceError('SINGING_JOB_INVALID');onRemoteJob(id);
   }
   if(!/^[a-f0-9]{32}$/.test(id??''))throw voiceError('SINGING_JOB_INVALID');
-  const pcm=await wavToPcm(root,await jobAudio(id),{signal,maxSeconds:60});
+  const pcm=await resample(root,await jobAudio(id),{signal,maxSeconds:60,lightVoice:!!original&&mixSettings.singingClarity!==false});
+  if(original){
+    onProgress('mix');
+    return mixOriginalBacking(pcm,original,mixSettings.backingVolume,signal);
+  }
   // Internal speech conversion is polished once by synthesis, including resumed jobs.
   if((request.kind==='score'||request.kind==='cover'&&!sourceWav)&&mixSettings.singingClarity!==false)return wavToPcm(root,pcmToWav(pcm),{signal,lightVoice:true});
   return pcm;

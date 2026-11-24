@@ -15,6 +15,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import {pluginEnabled} from '../packages/plugin-api/catalog.mjs';
+import {displayedMentions} from '../components/qq-bridge/src/core/incoming-address.js';
 import {groupMuted,groupMuteBlocks,groupMuteState,validMuteMentionId} from '../packages/plugin-api/group-mute.mjs';
 
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -30,6 +31,7 @@ export const conversationId = (wxid, name, mappedId) => {
 class AdapterError extends Error { constructor(code,data) { super(code); this.name = 'AdapterError';this.data=data; } }
 const fail = code => { throw new AdapterError(code); };
 const cleanAccountId = value => String(value ?? '').replace(/_[a-zA-Z0-9]{4}$/, '');
+const incomingAccountMatches=(candidate,own)=>!!own&&(candidate===own||(cleanAccountId(own).length>=5&&candidate===cleanAccountId(own)));
 const systemErrorCode = error => {
   for(let current=error,depth=0;current&&depth<4;current=current.cause,depth++)if(typeof current.code==='string'&&/^[A-Z][A-Z0-9_]{0,79}$/.test(current.code))return current.code;
   return undefined;
@@ -588,7 +590,7 @@ export class HookOneBot {
       const ref=quoteReply.reference;
       const sameChat=group?ref.conversationId===payload.sessionId:!ref.conversationId;
       ref.senderRelation=sameChat && ref.senderId && this.ownWxid
-        ? cleanAccountId(ref.senderId)===cleanAccountId(this.ownWxid)?'self':'other':'unknown';
+        ? incomingAccountMatches(ref.senderId,this.ownWxid)?'self':'other':'unknown';
     }
     const content=quoteReply?(quoteReply.reply||'[引用回复，正文为空]'):payload.content;
     const segments = [{ type: 'text', data: { text: content } }];
@@ -596,16 +598,26 @@ export class HookOneBot {
     if(payload.type===43)segments.push({type:'video',data:{file:'wechatagent://video/'+payload.video.id,media_id:payload.video.id}});
     if(payload.type===25769803825)segments.push({type:'file',data:{id:payload.file.id,name:payload.file.name,size:payload.file.size}});
     if ([3,47].includes(payload.type)) segments.push({type:'image',data:{file:'wechatagent://image/'+payload.image.id,media_id:payload.image.id,...(payload.type===47?{media_kind:'sticker'}:{})}});
-    if(group){
-      const mention=this.project.account.nicknames.map(name=>'@'+name)
-        .find(label=>content.includes(label+'\u2005')||content.endsWith(label));
-      if(mention)segments.unshift({type:'at',data:{qq:String(selfId),wechat_text:mention,wechat_verified:content.includes(mention+'\u2005')}});
+    let groupAt;
+    if(group&&!forwardedRecord&&payload.type!==PAT_TYPE){
+      const nicknames=this.project.account.nicknames;
+      const actual=Array.isArray(payload.mentionWxids)?payload.mentionWxids.slice(0,100).filter(value=>typeof value==='string'&&/^[A-Za-z0-9_@-]{1,128}$/.test(value)):[];
+      const displayed=displayedMentions(content),withMarker=content.includes('\u2005');
+      const namedSelf=displayed.find(name=>nicknames.includes(name)&&!['所有人','全体成员','all'].includes(name));
+      const suffix=!displayed.length?nicknames.find(name=>content.endsWith(' @'+name)):undefined;
+      if(actual.length)groupAt=this.ownWxid&&actual.some(name=>incomingAccountMatches(name,this.ownWxid))?'self':'other';
+      else if(displayed.length)groupAt=namedSelf?'self':'other';
+      if(groupAt==='self'||!groupAt&&suffix){
+        const name=namedSelf??suffix??displayed[0];
+        segments.unshift({type:'at',data:{qq:String(selfId),...(name?{wechat_text:'@'+name}:{}),
+          wechat_verified:actual.length?groupAt==='self':!!namedSelf&&withMarker&&content.includes('@'+namedSelf+'\u2005')}});
+      }
     }
     return { time: payload.timestamp || Math.floor(Date.now() / 1000), self_id: selfId, post_type: 'message',
       message_type: kind, sub_type: group ? 'normal' : 'friend', message_id: payload.rawid,
       user_id: userId, message: segments, raw_message: content,
       sender: { user_id: userId, nickname: payload.sourceName || payload.senderName || String(userId) },
-      ...({wechatagent:{senderWxid:payload.talkerId,...(group?{memberId:crypto.createHash('sha256').update('wechat-member:'+payload.talkerId).digest('hex')}:{}),...(payload.type===PAT_TYPE?{interaction:'pat'}:forwardedRecord?{forwardedRecord}:quoteReply?{quoteReply}:{})}}),
+      ...({wechatagent:{senderWxid:payload.talkerId,...(groupAt?{groupAt}:{}),...(group?{memberId:crypto.createHash('sha256').update('wechat-member:'+payload.talkerId).digest('hex')}:{}),...(payload.type===PAT_TYPE?{interaction:'pat'}:forwardedRecord?{forwardedRecord}:quoteReply?{quoteReply}:{})}}),
       ...(group ? { group_id: target, group_name: payload.groupName || String(target) } : {}) };
   }
   enqueue(payload) {

@@ -1,7 +1,7 @@
 // Pure shared data: installer, runtime, worker, DSH health and console UI use it.
 export const API_VERSION = 2;
 export const HOST_RUNTIME = 'isolated-v2';
-export const CONTRACT_REVISION = 'wechatagent-plugin-v2.9';
+export const CONTRACT_REVISION = 'wechatagent-plugin-v2.10';
 export const PERMISSION_LABELS = Object.freeze({
   model_embed: '调用本机嵌入模型（向所选本机服务提供当前聊天片段）',
   reply_policy: '控制已授权群聊的接话与重复回复抑制',
@@ -44,6 +44,7 @@ export const FEATURE_LABELS = Object.freeze({
   'voice-input-v1': '微信语音输入',
   'voice-input-route-v1': '语音接收、转写与回复完整链路',
   'local-sensevoice-v1': '本机 SenseVoice 语音转写',
+  'original-song-v1': '原创中文歌词、按谱演唱与本机伴奏',
   'native-voice-v1': '原生语音与唱歌',
   'people-memory-auto-v1':'明确人物事实自动保存与上下文召回',
   'people-memory-v1': '人物记忆',
@@ -88,7 +89,7 @@ export function hostCompatibility(item, live) {
 // Kept in one place so prepare/build checks cannot omit a new runtime module.
 export const PLUGIN_HOST_FILES = Object.freeze([
   'packages/plugin-api/contract.mjs', 'packages/plugin-api/catalog.mjs',
-  'packages/plugin-api/settings-protection.mjs',
+  'packages/plugin-api/group-mute.mjs', 'packages/plugin-api/settings-protection.mjs',
   'packages/plugin-api/memory-policy.mjs',
   'packages/plugin-api/embeddings.mjs',
   'packages/plugin-api/archive-memory.mjs',
@@ -107,7 +108,7 @@ export const PLUGIN_HOST_FILES = Object.freeze([
   'packages/public-media/index.mjs', 'packages/dsh-social-bridge-plugin/search-provider.mjs',
   'packages/plugin-api/voice-status.mjs',
   'packages/plugin-api/people-memory.mjs', 'packages/plugin-api/people-facts.mjs', 'packages/dsh-social-bridge-plugin/member-memory.mjs', 'packages/plugin-api/admin-dsh.mjs',
-  'packages/voice-studio/jobs.mjs', 'packages/voice-studio/singing.mjs',
+  'packages/voice-studio/jobs.mjs', 'packages/voice-studio/singing.mjs', 'packages/voice-studio/original.mjs',
   'packages/voice-studio/synthesis.mjs', 'packages/voice-studio/voices.mjs', 'packages/voice-studio/speech-api.mjs',
   'packages/voice-studio/music.mjs', 'packages/voice-studio/delivery-policy.mjs', 'packages/voice-studio/reply-replacement.mjs',
   'packages/netease/client.mjs', 'packages/netease/credential.ps1',

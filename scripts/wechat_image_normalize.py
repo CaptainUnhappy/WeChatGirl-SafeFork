@@ -84,7 +84,7 @@ def image_compression(settings):
 
 
 def normalize_image(raw, animated=False, *, max_side=1280, max_source_bytes=8 * 1024 * 1024,
-                    jpeg_quality=85, max_kib=768):
+                    jpeg_quality=85, max_kib=768, prefer_detail=False):
     if not raw or len(raw) > max_source_bytes:
         raise RuntimeError('IMAGE_TOO_LARGE_OR_EMPTY')
     with Image.open(io.BytesIO(raw)) as source:
@@ -110,13 +110,24 @@ def normalize_image(raw, animated=False, *, max_side=1280, max_source_bytes=8 * 
         else:
             image = ImageOps.exif_transpose(source).convert('RGB')
         image.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+        if prefer_detail and source.format == 'PNG':
+            output = io.BytesIO()
+            image.save(output, format='PNG', compress_level=4)
+            data = output.getvalue()
+            if len(data) <= max_kib * 1024:
+                return image_result(data, image, 'image/png')
         # Keep small text legible when possible, while retaining the existing
         # transport cap. Detailed photos may need another bounded resize.
         for _ in range(8):
             for quality in dict.fromkeys(max(45, jpeg_quality - offset) for offset in (0, 10, 20)):
                 output = io.BytesIO()
-                image.save(output, format='JPEG', quality=quality, optimize=True)
-                data = output.getvalue()
+                for subsampling in ((0, 2) if prefer_detail else (2,)):
+                    output.seek(0)
+                    output.truncate()
+                    image.save(output, format='JPEG', quality=quality, optimize=True, subsampling=subsampling)
+                    data = output.getvalue()
+                    if len(data) <= max_kib * 1024:
+                        break
                 if len(data) <= max_kib * 1024:
                     break
             if len(data) <= max_kib * 1024:
@@ -124,7 +135,10 @@ def normalize_image(raw, animated=False, *, max_side=1280, max_source_bytes=8 * 
             image.thumbnail((max(1, int(image.width * .8)), max(1, int(image.height * .8))), Image.Resampling.LANCZOS)
         else:
             raise RuntimeError('NORMALIZED_IMAGE_TOO_LARGE')
-        return {'b64': base64.b64encode(data).decode('ascii'), 'mime': 'image/jpeg',
-            'width': image.width, 'height': image.height, 'bytes': len(data),
-            'sha256': hashlib.sha256(data).hexdigest()}
+        return image_result(data, image, 'image/jpeg')
 
+
+def image_result(data, image, mime):
+    return {'b64': base64.b64encode(data).decode('ascii'), 'mime': mime,
+        'width': image.width, 'height': image.height, 'bytes': len(data),
+        'sha256': hashlib.sha256(data).hexdigest()}

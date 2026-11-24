@@ -66,6 +66,13 @@ const chatDshAccess=(key,message)=>{
   const settings=liveWechat();
   return assistantSenderAllowed(settings,key,verifiedAssistantSender(message))&&conversationAccess(settings,key).chatExecution===true;
 };
+const chatDshHint=(key,message)=>{
+  const settings=liveWechat(),access=conversationAccess(settings,key);
+  if(!assistantSenderAllowed(settings,key,verifiedAssistantSender(message)))return null;
+  if(access.chatExecution!==true)return '当前聊天还没开启 DSH 交办。请在 WeChatGirl 的「聊天 → 设置此聊天 → 能力与权限」开启“聊天模式调用 DSH”。';
+  if(!access.tools.length&&!access.skills.length)return '这个聊天还没分配 DSH 工具或技能。请在「设置此聊天 → 能力与权限」勾选任务所需的能力并保存。';
+  return null;
+};
 const workModeFor=key=>conversationWorkMode(config.search_policy_file?JSON.parse(fs.readFileSync(config.search_policy_file,'utf8').replace(/^\uFEFF/,'' )).wechat:wechat,key);
 const modeFor=key=>conversationMode(config.search_policy_file?JSON.parse(fs.readFileSync(config.search_policy_file,'utf8').replace(/^\uFEFF/,'' )).wechat:wechat,key);
 const searchPolicyFor=key=>searchPolicy(config.search_policy_file?JSON.parse(fs.readFileSync(config.search_policy_file,'utf8').replace(/^\uFEFF/,'' )).wechat:wechat,key);
@@ -87,7 +94,7 @@ const recognizeVideo=createIncomingVideo({root:historyRoot,describe:(input,optio
 const videoAccess=key=>pluginEnabled(historyRoot,'video-workbench',key)?pluginConfiguration(historyRoot).revision:null;
 const engine = new SocialEngine({ buffer,connection, roleFor: key => personaFor(key).persona,
   recognizeVideo,videoAccess,muteStateFor:key=>groupMute.state(key),
-  personaNameFor: key => personaFor(key).personaName,workModeFor,chatDshAccess,assistantControl:(key,action,message,command)=>plugin.assistantTask(key,action,{...command,senderWxid:verifiedAssistantSender(message)}),assistantAccess:(key,message)=>assistantSenderAllowed(liveWechat(),key,verifiedAssistantSender(message)),
+  personaNameFor: key => personaFor(key).personaName,workModeFor,chatDshAccess,chatDshHint,assistantControl:(key,action,message,command)=>plugin.assistantTask(key,action,{...command,senderWxid:verifiedAssistantSender(message)}),assistantAccess:(key,message)=>assistantSenderAllowed(liveWechat(),key,verifiedAssistantSender(message)),
   wakeWords: wechat.wake_words ?? [],
   mode: wechat.wake_mode ?? 'hybrid',modeFor, batchMs: config.social?.batch_ms ?? 3000,
   minIntervalMs: config.social?.min_interval_ms ?? 15000,

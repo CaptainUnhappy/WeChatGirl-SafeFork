@@ -1,17 +1,18 @@
 {
   "id": "voice-studio",
   "name": "肥鱼声音工作室",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "apiVersion": 2,
   "host": "wechatagent",
   "author": "WeChatGirl",
-  "description": "申请微信语音气泡与歌曲制作，支持自定义和随机音色、部分句子随机改发语音、伴奏分离及成品复用。默认调用本地部署，需准备模型与发送组件；语音音色页可选本地兼容 GGUF 模型或外接语音 API。",
+  "description": "申请微信语音气泡与歌曲制作，支持原创词曲与伴奏、自定义和随机音色、部分句子随机改发语音、伴奏分离及成品复用。默认调用本地部署，需准备模型与发送组件；语音音色页可选本地兼容 GGUF 模型或外接语音 API。",
   "permissions": [
     "storage",
     "voice"
   ],
   "requiresHostFeatures": [
     "native-voice-v1",
+    "original-song-v1",
     "netease-song-link-v1",
     "saved-songs-v1",
     "random-voice-replacement-v1",

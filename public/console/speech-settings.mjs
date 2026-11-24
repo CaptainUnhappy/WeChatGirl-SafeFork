@@ -1,7 +1,10 @@
+const localProtocols=new Set(['local-whisper','local-sensevoice']);
 const states=new Set(['ok','error','warning','pending']);
 export const speechProtocolLabels=Object.freeze({'local-whisper':'本机 Whisper 模型','local-sensevoice':'本机 SenseVoice（CPU）',auto:'自动识别地址格式', 'openai-transcriptions':'语音转写 API（文件上传）','openai-chat':'Chat 音频（Base64）','chat-audio-data-url':'Chat 音频（Data URL）','anthropic-messages':'Anthropic Messages（仅模型发现）',custom:'自定义请求（保留手动模板）'});
 export function speechProtocolField({attr,field,schema,value,esc}){
-  return `<div class="field"><label for="${esc(field)}">API 协议</label><select ${attr}>${schema.enum.map((option,index)=>`<option value="${index}" ${option===value?'selected':''}>${esc(speechProtocolLabels[option]??option)}</option>`).join('')}</select><small>本机 Whisper 使用本地模型转写，DSH 接收转写文字；也可选用外接 API 的音频协议。</small></div>`;
+  const groups=[['本机识别',schema.enum.filter(option=>localProtocols.has(option))],['云端 / 外接识别',schema.enum.filter(option=>!localProtocols.has(option))]];
+  const options=groups.map(([name,choices])=>'<optgroup label="'+esc(name)+'">'+choices.map(option=>'<option value="'+schema.enum.indexOf(option)+'" '+(option===value?'selected':'')+'>'+esc(speechProtocolLabels[option]??option)+'</option>').join('')+'</optgroup>').join('');
+  return `<div class="field"><label for="${esc(field)}">API 协议</label><select ${attr}>${options}</select><small>本机模式不上传微信语音；云端模式填写服务地址、密钥和模型，获授权的聊天语音会发给该服务。</small></div>`;
 }
 export function speechModelField({attr,field,label,value,esc}){
   return `<div class="field speech-model-field"><label for="${field}">${label}</label><div class="speech-model-row"><select id="speech-api-models" aria-label="API 返回的模型"><option value="">读取后选择模型</option></select><input ${attr} type="text" value="${esc(value)}" placeholder="也可手动填写模型 ID" autocomplete="off"></div><small id="speech-model-hint">读取模型不会发送语音；列表可见不代表已验证语音识别。</small></div>`;
@@ -15,7 +18,7 @@ export function bindSpeechSettings({form,api,item,revision,readValues,esc}){
   const badge=form.querySelector('#speech-service-state'),note=form.querySelector('#speech-service-note'),checks=form.querySelector('#speech-service-checks'),hint=form.querySelector('#speech-model-hint');
   const readButton=form.querySelector('#speech-read-models'),checkButton=form.querySelector('#speech-check-api');
   let sequence=0,controller,timer,closed=false,models=[];
-  const local=()=>['local-whisper','local-sensevoice'].includes(readValues().apiProtocol);
+  const local=()=>localProtocols.has(readValues().apiProtocol);
   const syncSource=()=>{
     const isLocal=local();
     for(const field of ['apiKey','model','audioFormat','autoReadModels']){
@@ -26,7 +29,7 @@ export function bindSpeechSettings({form,api,item,revision,readValues,esc}){
     const endpoint=form.querySelector('[data-plugin-setting="endpoint"]');
     endpoint.closest('.field').hidden=readValues().apiProtocol==='local-sensevoice';
     endpoint.placeholder=isLocal?'http://127.0.0.1:8080/inference':'https://语音服务地址/v1';
-    endpoint.closest('.field').querySelector('small').textContent=isLocal?'可留空使用默认地址。请先用多语种模型启动本机 whisper-server，再检测配置。':'标准协议可填写服务基础地址或完整识别路径。自定义请求需要完整 POST 地址。';
+    endpoint.closest('.field').querySelector('small').textContent=isLocal?'可留空使用默认地址。请先用多语种模型启动本机 whisper-server，再检测配置。':'云端服务使用 HTTPS。可填带版本号的基础地址或完整识别路径；自定义协议填完整 POST 地址。';
   };
   const setState=(label,message,state='pending')=>{badge.textContent=label;badge.className='status-tag '+(states.has(state)?state:'pending');note.textContent=message;};
   const validEndpoint=()=>{try{const value=readValues().endpoint;return !local()&&!!value&&['http:','https:'].includes(new URL(value).protocol);}catch{return false;}};

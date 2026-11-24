@@ -1,3 +1,34 @@
+const commonToolLabels=new Map(Object.entries({
+  read:['读取文件','读取指定文件内容。'],read_file:['读取文件','读取指定文件内容。'],
+  write:['写入文件','写入或创建文件，可能覆盖原内容。'],write_file:['写入文件','写入或创建文件，可能覆盖原内容。'],
+  edit:['编辑文件','修改现有文件内容。'],edit_file:['编辑文件','修改现有文件内容。'],
+  apply_patch:['应用代码补丁','可能创建、修改或删除文件。'],
+  glob:['按名称查找文件','按匹配规则查找目录和文件。'],grep:['搜索文件内容','从文件中查找关键词或匹配文本。'],
+  ls:['查看目录','列出指定目录下的文件。'],
+  working_directory:['查看或切换工作目录','会改变后续工具解析相对路径的位置；已运行的程序不受影响。'],
+  bash:['运行 Bash 命令','在终端执行命令，可能读写本机文件或联网。'],
+  pwsh:['运行 PowerShell 命令','在终端执行命令，可能读写本机文件或联网。'],
+  powershell:['运行 PowerShell 命令','在终端执行命令，可能读写本机文件或联网。'],
+  shell:['运行终端命令','可能读写本机文件或联网。'],exec_command:['运行终端命令','可能读写本机文件或联网。'],
+  web_search:['搜索网页','向搜索服务发出请求。'],web_fetch:['读取网页','访问指定网页并提取正文。'],
+  task:['委派任务','将任务交给子助手执行。'],skill:['加载技能','读取技能说明；技能本身不等于执行权限。'],
+  todo_write:['更新待办','维护当前任务的待办清单。']
+}));
+const memeToolLabels=new Map([
+  ['meme_list',['查看表情库','按图库、分类或关键词查看已有表情，只读。']],
+  ['meme_update',['整理表情库标签','修改已有表情的分类、描述或关键词，不改图片本身。']]
+]);
+export function capabilityCopy(item,kind,sourceKind,sourcePackage){
+  const original=item.description?.trim()??'',name=item.name;
+  const builtinLabel=sourceKind==='builtin'?commonToolLabels.get(name.toLowerCase()):null;
+  const registered=sourceKind==='plugin'&&sourcePackage==='dsh-meme'?memeToolLabels.get(name):
+    sourceKind==='plugin'&&sourcePackage==='dsh-social-bridge-plugin'&&name==='meme-search__search'?['查找表情素材','按关键词查找候选表情素材，并返回来源，不直接发送。']:null;
+  const dependencies=sourceKind==='unknown'&&name==='load_workspace_dependencies'&&/^Get absolute paths to bundled Python and library directories/i.test(original)?['获取工作区运行环境路径','查看项目可用的 Python、依赖库及其他运行工具的安装位置。']:null;
+  const translation=kind==='tools'?(builtinLabel??registered??dependencies):null;
+  if(translation)return {title:translation[0],summary:translation[1],original};
+  return {title:name,summary:!original?'DSH 未提供说明，请先确认用途再授权。':/[㐀-鿿]/u.test(original)?original:'此项暂无中文说明，请参照 DSH 原文。',original};
+}
+
 const unknown = { id:'unverified', name:'来源未确认的工具', kind:'unknown',
   description:'只显示已加载的工具；尚未取得可靠的插件来源，不把工具 ID 当作插件名称。' };
 const unloaded = { id:'unloaded', name:'已分配但未加载的工具', kind:'unavailable',
@@ -27,12 +58,15 @@ export function catalogGroups(catalog, selected, original) {
 }
 
 export function renderCatalogOptions(catalog, selected, original, esc) {
-  const row = (item,kind,source='') => `<label class="extension-option dsh-option" data-capability-row data-search="${esc([source,item.name,item.description].join(' ').toLowerCase())}"><input type="checkbox" data-dsh-kind="${kind}" value="${esc(item.name)}" ${selected[kind].includes(item.name)?'checked':''}><span class="capability-copy"><strong>${esc(item.name)} ${item.loaded===false?'<span class="status-tag warn">未加载</span>':''}</strong><small>${esc(item.description??'')}</small></span></label>`;
+  const row = (item,kind,source='',sourceKind,sourcePackage) => {
+    const copy=capabilityCopy(item,kind,sourceKind,sourcePackage);
+    return `<label class="extension-option dsh-option" data-capability-row data-search="${esc([source,item.name,copy.title,copy.summary,copy.original].join(' ').toLowerCase())}"><input type="checkbox" data-dsh-kind="${kind}" value="${esc(item.name)}" ${selected[kind].includes(item.name)?'checked':''}><span class="capability-copy"><strong>${esc(copy.title)} ${item.loaded===false?'<span class="status-tag warn">未加载</span>':''}</strong>${copy.title!==item.name?'<small class="mono">'+esc(item.name)+'</small>':''}<small>${esc(copy.summary)}</small>${copy.original&&copy.original!==copy.summary?'<small lang="en">'+esc(copy.original)+'</small>':''}</span></label>`;
+  };
   const skills = new Map((catalog?.skills??[]).map(item=>[item.name,{...item,loaded:true}]));
   for (const name of new Set([...(original.skills??[]),...selected.skills])) if (!skills.has(name)) skills.set(name,{name,description:'当前 DSH 未加载此技能，已有授权保留。',loaded:false});
   const view = catalogGroups(catalog,selected,original);
   const groups = view.groups.map(group=>{
-    const content=`${group.packageName?`<p class="capability-package mono">${esc(group.packageName)}${group.version?' · '+esc(group.version):''}</p>`:''}${group.description?`<p class="capability-source-description">${esc(group.description)}</p>`:''}${group.tools.map(tool=>row(tool,'tools',[group.name,group.packageName??''].join(' '))).join('')}`;
+    const content=`${group.packageName?`<p class="capability-package mono">${esc(group.packageName)}${group.version?' · '+esc(group.version):''}</p>`:''}${group.description?`<p class="capability-source-description">${esc(group.description)}</p>`:''}${group.tools.map(tool=>row(tool,'tools',[group.name,group.packageName??''].join(' '),group.kind,group.packageName)).join('')}`;
     const heading=`${esc(group.name)}${group.kind==='builtin'?'<span class="status-tag">内置</span>':''}<span data-group-count></span>`;
     return group.kind==='builtin'&&group.tools.length>4?`<details class="extension-fieldset capability-list capability-source capability-fold" data-capability-group data-capability-fold><summary>${heading}</summary><div role="group" aria-label="${esc(group.name)}">${content}</div></details>`:`<fieldset class="extension-fieldset capability-list capability-source" data-capability-group><legend>${heading}</legend>${content}</fieldset>`;
   }).join('');

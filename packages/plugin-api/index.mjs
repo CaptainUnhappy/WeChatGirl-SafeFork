@@ -84,7 +84,7 @@ export class PluginRuntime{
         if(method==='voice.enqueue'){
           if(readOnly)throw fail('PLUGIN_HOOK_READ_ONLY');let request=voiceRequest(args[0]),settings=this.policy().config.plugins[record.id]?.settings??{};
           if(request.kind==='song')request={...request,playbackMode:turn.songPlaybackMode??request.playbackMode??new MusicPreferences(this.root).snapshot().mode};
-          if(turn.networkOptOut){if(request.kind!=='song'||!new SavedSongs(this.root).find(request,settings))throw fail('PLUGIN_NETWORK_DISABLED_FOR_TURN');request={...request,cachedOnly:true};}
+          if(turn.networkOptOut&&request.kind!=='original'){if(request.kind!=='song'||!new SavedSongs(this.root).find(request,settings))throw fail('PLUGIN_NETWORK_DISABLED_FOR_TURN');request={...request,cachedOnly:true};}
           turn.voiceRequests??=[];if(turn.voiceRequests.length>=3)throw fail('VOICE_QUEUE_FULL');turn.voiceRequests.push({id:record.id,generation:record.generation,request,fallbackText:request.kind==='speech'?request.text:undefined});
           return {staged:true,savedSongReady:request.cachedOnly===true,...(request.kind==='song'?{playbackMode:request.playbackMode,modeLabel:songPlayback(request.playbackMode).label}:{})};
         }

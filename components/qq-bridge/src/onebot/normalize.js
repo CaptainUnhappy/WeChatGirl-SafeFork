@@ -33,6 +33,7 @@ export function normalizeOneBotEvent(platform, adapter, event) {
     ...(platform==='wechat'&&kind==='group'&&/^[a-f0-9]{64}$/.test(event.wechatagent?.memberId??'')?{sender_key:event.wechatagent.memberId}:{}),
     self_id: String(event.self_id ?? ''), message_id: String(event.message_id ?? `local-${fingerprint}`),
     message_type: messageType ?? 'unknown', text: text || (images.length ? '[图片]' : voice ? '[语音，尚未转写]' : video ? '[视频]' : ''), images, files, timestamp, segments, raw: event,
+    ...(platform==='wechat'&&kind==='group'&&['self','other'].includes(event.wechatagent?.groupAt)?{groupAt:event.wechatagent.groupAt}:{}),
     ...(voice?{voice:{id:voice.data.voice_id,durationSeconds:voice.data.duration}}:{}),
     ...(video?{videoId:video.data.media_id}:{}),
     ...(platform==='wechat' && event.wechatagent?.interaction==='pat'?{interaction:'pat'}:{}),

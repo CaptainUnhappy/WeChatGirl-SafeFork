@@ -177,3 +177,6 @@ test('enabling speech rejects a legacy advertised capability and preserves grant
   complete=true;const accepted=await send();assert.equal(accepted.status,200);
   const saved=configuration(f.root).config.plugins['speech-recognition'];assert.equal(saved.enabled,true);assert.deepEqual(saved.chats,['wechat:private:123']);assert.deepEqual(saved.permissions,['audio_read']);
 });
+
+import {speechProtocolField} from '../public/console/speech-settings.mjs';
+test('speech protocol picker separates local and cloud without changing saved protocol indexes',()=>{const html=speechProtocolField({attr:'id="protocol"',field:'protocol',schema:{enum:['auto','local-whisper','openai-transcriptions']},value:'openai-transcriptions',esc:String});assert.match(html,/本机识别/);assert.match(html,/云端/);assert.match(html,/value="2" selected/);});
