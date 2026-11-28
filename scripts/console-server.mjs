@@ -116,12 +116,12 @@ export function validateConsoleConfig(config, root) {
 }
 
 import {allowedConversation,validateConversationSettings,conversationWorkMode} from '../packages/dsh-social-bridge-plugin/conversation-policy.mjs';
-export function createConsole({ root = projectRoot, port = 3210, runner, readerSetup = runReaderSetup, accountVerifier = verifyWeChatAccount, fetchImpl = fetch, nodeExecutable = process.execPath, filePicker, onQuit, processProbe, processStop, officialLogin, speechCapabilities, wechatClientScan } = {}) {
+export function createConsole({ root = projectRoot, port = 3210, runner, readerSetup = runReaderSetup, accountVerifier = verifyWeChatAccount, fetchImpl = fetch, nodeExecutable = process.execPath, filePicker, onQuit, processProbe, processStop, officialLogin, externalMusicLogin, speechCapabilities, wechatClientScan } = {}) {
   const updates=createUpdateChecker({root,fetchImpl});
   const wechatClients=createClientDetector(root,{scan:wechatClientScan});
   const publicDir = path.join(projectRoot, 'public', 'console');
   const pluginInstaller=new PluginInstaller(root);const pluginBundles=new PluginBundles(root,projectRoot,pluginInstaller,{fetcher:fetchImpl});
-  const musicConsole=createMusicConsole(root,{officialLogin});
+  const musicConsole=createMusicConsole(root,{officialLogin,externalMusicLogin});
   const voiceConsole=createVoiceConsole(root);
   const speechChecks=createSpeechPluginConsole({root,fetchImpl,...(speechCapabilities?{readCapabilities:speechCapabilities}:{})});
   const personaCategories=createPersonaCategories(root);
@@ -449,7 +449,7 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
         assets['/workspace-layout.css']=['workspace-layout.css','text/css; charset=utf-8'];
         assets['/assistant-feedback.js']=['assistant-feedback.js','text/javascript; charset=utf-8'];
         for(const file of ['interface-model.mjs','theme-init.js','color-theme.js','persona-studio.js','persona-studio-model.mjs'])assets['/'+file]=[file,'text/javascript; charset=utf-8'];
-        for(const file of ['ui-polish.css','persona-studio.css','redesign.css'])assets['/'+file]=[file,'text/css; charset=utf-8'];
+        for(const file of ['ui-polish.css','persona-studio.css','redesign.css','ui-modes.css'])assets['/'+file]=[file,'text/css; charset=utf-8'];
         assets['/memory-view.js']=['memory-view.js','text/javascript; charset=utf-8'];assets['/memory-view.css']=['memory-view.css','text/css; charset=utf-8'];
         assets['/memory-constellation.js']=['memory-constellation.js','text/javascript; charset=utf-8'];
         for(const file of ['memory-galaxy.mjs','memory-constellation-demo.mjs'])assets['/'+file]=[file,'text/javascript; charset=utf-8'];
@@ -853,7 +853,7 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
     };
     listen();
   });
-  server.on('close',()=>{pluginInstaller.dispose();speechChecks.close();voiceDownloads.cancel();});
+  server.on('close',()=>{pluginInstaller.dispose();speechChecks.close();voiceDownloads.cancel();musicConsole.close();});
   server.once('close',()=>memoryEvaluation.close());
   return { server, shutdown, isBusy: () => shuttingDown || !!activeJob || protectingCredential || processRecoveryBusy || voiceComponents.busy, close: () => { memoryEvaluation.close();server.closeAllConnections(); server.close(); }, start };
 }

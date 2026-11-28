@@ -99,7 +99,8 @@ else {
       const { prepare } = await import(pathToFileURL(path.join(root, 'scripts/project-config.mjs')).href);
       prepare(root);
     }
-    consoleApp = createConsole({ root, port: 0, nodeExecutable: runtimeNode, officialLogin:officialMusicLogin,
+    const externalMusicLogin = require(path.join(root,'scripts/music-login-windows.cjs'))({BrowserWindow,session});
+    consoleApp = createConsole({ root, port: 0, nodeExecutable: runtimeNode, officialLogin:officialMusicLogin, externalMusicLogin,
       onQuit: () => app.quit(),
       filePicker: async kind => {
         const result = await dialog.showOpenDialog(window, { title: kind === 'zip' ? '选择 WeChatGirl 语音组件 ZIP 包' : kind === 'workspace' ? '选择工作区目录' : kind === 'folder' ? '选择微信数据库目录' : '选择程序', properties: ['folder','workspace'].includes(kind) ? ['openDirectory'] : ['openFile'], ...(kind === 'zip' ? { filters: [{ name: '语音组件包', extensions: ['zip'] }] } : kind === 'exe' ? { filters: [{ name: '程序', extensions: ['exe'] }] } : {}) });

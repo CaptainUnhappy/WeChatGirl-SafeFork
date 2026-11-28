@@ -24,7 +24,65 @@ function exists(file){try{fs.lstatSync(file);return true;}catch(error){if(error.
 export function createVoiceDownloads({root,python,fetchImpl=fetch,spec=VOICE_DOWNLOADS}){
   let job=null,controller=null,pending=null;
   const targetFor=(id,item)=>path.join(root,item.directory,...(id==='breeze'?[item.files[0].name]:[]));
-  const snapshot=()=>({items:Object.entries(spec).map(([id,item])=>({id,name:item.name,source:item.source,license:item.license,bytes:item.files.reduce((sum,file)=>sum+file.bytes,0),exists:exists(targetFor(id,item))})),job});
+  const snapshot=()=>({items:Object.entries(spec).map(([id,item])=>({id,name:item.name,source:item.source,license:item.license,...(id==='breeze'?{manualUrls:item.files[0].urls}:{}),bytes:item.files.reduce((sum,file)=>sum+file.bytes,0),exists:exists(targetFor(id,item))})),job});
+  async function resumableDownload(item,file,signal){
+    const offset=()=>{
+      if(!exists(file))return 0;
+      const stat=fs.lstatSync(file);
+      if(!stat.isFile()||stat.isSymbolicLink())throw fault('下载缓存路径不安全，请检查模型目录。');
+      if(stat.size>item.bytes){fs.unlinkSync(file);return 0;}
+      return stat.size;
+    };
+    let last='NETWORK';
+    const verify=async()=>{
+      job.phase='verifying';
+      const hash=crypto.createHash('sha256');
+      for await(const chunk of fs.createReadStream(file,{signal}))hash.update(chunk);
+      if(hash.digest('hex')===item.sha256)return true;
+      fs.unlinkSync(file);job.fileBytes=0;job.phase='downloading';last='HASH';
+      return false;
+    };
+    if(offset()===item.bytes&&await verify())return;
+    for(const url of item.urls){
+      const attempt=new AbortController();
+      const combined=AbortSignal.any([signal,attempt.signal]);
+      let timer;
+      const arm=()=>{clearTimeout(timer);timer=setTimeout(()=>attempt.abort(),45000);timer.unref?.();};
+      try{
+        let start=offset();job.fileBytes=start;job.phase='downloading';
+        arm();
+        const response=await fetchImpl(url,{signal:combined,credentials:'omit',referrerPolicy:'no-referrer',
+          headers:{'Accept-Encoding':'identity',...(start?{Range:'bytes='+start+'-'}:{})}});
+        if(response.status===200){
+          const len=response.headers.get('content-length');
+          if(len!==null&&Number(len)!==item.bytes){await response.body?.cancel();throw Error('SIZE');}
+          start=0;
+        }else if(response.status===206){
+          const expected='bytes '+start+'-'+(item.bytes-1)+'/'+item.bytes;
+          if(response.headers.get('content-range')!==expected){await response.body?.cancel();throw Error('RANGE');}
+        }else{await response.body?.cancel();throw Error('NETWORK');}
+        if(!response.body||!['','identity'].includes(response.headers.get('content-encoding')??'')){
+          await response.body?.cancel();throw Error('NETWORK');
+        }
+        let bytes=start;job.fileBytes=start;
+        await pipeline(Readable.fromWeb(response.body),new Transform({transform(chunk,_encoding,callback){
+          arm();
+          if(bytes+chunk.length>item.bytes){callback(Error('SIZE'));return;}
+          bytes+=chunk.length;job.fileBytes=bytes;callback(null,chunk);
+        }}),fs.createWriteStream(file,{flags:start?'a':exists(file)?'w':'wx'}),{signal:combined});
+        clearTimeout(timer);
+        if(bytes!==item.bytes)throw Error('NETWORK');
+        if(await verify())return;
+      }catch(error){
+        if(signal.aborted)throw error;
+        last=error.message;
+        if(last==='SIZE'&&offset()===item.bytes)fs.unlinkSync(file);
+      }finally{clearTimeout(timer);}
+    }
+    job.fileBytes=offset();
+    throw fault(last==='HASH'?'文件校验不一致，已清除损坏的缓存，请重试。':
+      job.fileBytes>0?'下载中断，已保留进度。点击继续下载即可续传。':'下载源暂时不可用。可重试，或通过浏览器下载 GGUF 后在语音音色页选择本机模型。');
+  }
   async function download(item,stage,signal){
     const file=path.join(stage,item.name);
     for(const url of item.urls){
@@ -55,6 +113,21 @@ export function createVoiceDownloads({root,python,fetchImpl=fetch,spec=VOICE_DOW
       catch{throw fault('本机识别需要发行版内置的 Python 3.13，请检查运行环境设置。');}
     }
     const parent=directory(root,isBreeze?item.directory:item.directory.split('/').slice(0,-1).join('/'));
+    if(isBreeze){
+      const file=item.files[0],partial=path.join(parent,'.'+file.name+'.'+file.sha256.slice(0,12)+'.part');
+      const available=fs.statfsSync(parent,{bigint:true});
+      let existing=0;
+      if(exists(partial)){const info=fs.lstatSync(partial);if(!info.isFile()||info.isSymbolicLink())throw fault('下载缓存路径不安全，请检查模型目录。');existing=info.size<=file.bytes?info.size:0;}
+      if(available.bavail*available.bsize<BigInt(file.bytes-existing+128*1024*1024))throw fault('磁盘空间不足，请清理后重试。');
+      job.file=file.name;job.fileBytes=existing;
+      await resumableDownload(file,partial,signal);
+      signal.throwIfAborted();
+      if(exists(target))throw fault('目标已经存在，保留原文件。');
+      fs.linkSync(partial,target);
+      fs.unlinkSync(partial);
+      job.done=file.bytes;job.fileBytes=0;
+      return;
+    }
     const available=fs.statfsSync(parent,{bigint:true});
     if(available.bavail*available.bsize<BigInt(job.total+128*1024*1024))throw fault('磁盘空间不足，请清理后重试。');
     const stage=fs.mkdtempSync(path.join(parent,'.voice-download-'));
@@ -75,8 +148,7 @@ export function createVoiceDownloads({root,python,fetchImpl=fetch,spec=VOICE_DOW
       }
       signal.throwIfAborted();
       if(exists(target))throw fault('目标已经存在，保留原文件。');
-      if(isBreeze)fs.linkSync(path.join(stage,item.files[0].name),target);
-      else fs.renameSync(stage,target);
+      fs.renameSync(stage,target);
     }finally{fs.rmSync(stage,{recursive:true,force:true});}
   }
   return {snapshot,
@@ -90,7 +162,7 @@ export function createVoiceDownloads({root,python,fetchImpl=fetch,spec=VOICE_DOW
       job={id:body.id,phase:'downloading',done:0,fileBytes:0,total:item.files.reduce((sum,file)=>sum+file.bytes,0)};
       pending=run(body.id,item,signal).then(()=>{job.phase='complete';job.message='已下载并校验。';}).catch(error=>{
         job.phase=controller.signal.aborted?'cancelled':'failed';
-        job.message=controller.signal.aborted?'已取消下载。':error.status?error.message:'下载或安装未完成，请检查网络、磁盘和内置 Python 后重试。';
+        job.message=controller.signal.aborted?(body.id==='breeze'?'已暂停下载，可继续。':'已取消下载。'):error.status?error.message:'下载或安装未完成，请检查网络、磁盘和内置 Python 后重试。';
       }).finally(()=>{pending=null;controller=null;});
       return snapshot();
     },

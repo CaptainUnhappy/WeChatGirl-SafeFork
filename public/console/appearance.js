@@ -1,4 +1,4 @@
-import {fontSize} from './interface-model.mjs';
+import {fontSize,uiMode,nextUiMode,UI_MODES} from './interface-model.mjs';
 const normalize = value => ({
   imageDataUrl: /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(value?.imageDataUrl ?? '') ? value.imageDataUrl : '',
   name: typeof value?.name === 'string' ? value.name : '',
@@ -16,13 +16,45 @@ export function initAppearance({ api, modal, closeModal, toast, escapeHtml, icon
     layer.style.opacity = String(appearance.strength / 100);
     document.body.classList.toggle('has-wallpaper', !!appearance.imageDataUrl);
   }
-  let interfaceSettings;
+  let interfaceSettings,modeSaving=false;
+  const quick=document.getElementById('quick-ui-mode'),html=document.documentElement;
+  function applyMode(value){
+    const mode=uiMode(value);
+    html.dataset.uiMode=mode;
+    try{localStorage.setItem('wechatgirl-console-ui',mode);}catch{}
+    if(quick)quick.textContent='切换'+UI_MODES[nextUiMode(mode)].label;
+    document.querySelectorAll('.ui-style-choice[data-ui-mode]').forEach(el=>el.setAttribute('aria-pressed',String(el.dataset.uiMode===mode)));
+  }
+  async function switchMode(value){
+    const next=uiMode(value),previous=uiMode(html.dataset.uiMode);
+    if(modeSaving||previous===next)return;
+    modeSaving=true;
+    if(quick)quick.disabled=true;
+    applyMode(next);
+    try{
+      const latest=await api('/api/interface-preferences');
+      interfaceSettings=await api('/api/interface-preferences',{revision:latest.revision,uiMode:next});
+      applyMode(interfaceSettings.uiMode);
+    }catch(error){
+      applyMode(previous);
+      const line=document.getElementById('appearance-error');
+      if(line){line.hidden=false;line.textContent='界面风格未保存：'+error.message;}
+      else toast('界面风格未保存，请重试。');
+    }finally{modeSaving=false;if(quick)quick.disabled=false;}
+  }
+  applyMode(html.dataset.uiMode);
+  quick?.addEventListener('click',()=>{
+    document.querySelector('.topbar-more')?.removeAttribute('open');
+    void switchMode(nextUiMode(html.dataset.uiMode));
+  });
   const applyFont=value=>document.documentElement.style.setProperty('--ui-font-scale',String(fontSize(value)/14));
-  void api('/api/interface-preferences').then(value=>{interfaceSettings=value;applyFont(value.fontSize);}).catch(()=>{});
+  void api('/api/interface-preferences').then(value=>{interfaceSettings=value;applyFont(value.fontSize);if(!modeSaving)applyMode(value.uiMode);}).catch(()=>{});
   function render() {
     const current = colors.get();
     document.querySelector('.topbar-more')?.removeAttribute('open');
-    modal('外观与阅读', `<p class="modal-description">调整字号、显示模式与配色。修改自动保存，只在本机生效。</p>
+    modal('外观与阅读', `<p class="modal-description">调整界面风格、字号、深浅主题与配色。修改自动保存，只在本机生效。</p>
+      <section class="appearance-section ui-style-section"><div class="appearance-section-heading"><h3>界面风格</h3><span>与浅色、深色主题独立</span></div><div class="ui-style-options" role="group" aria-label="界面风格">
+      ${Object.entries(UI_MODES).map(([id,{label,description}])=>`<button type="button" class="ui-style-choice" data-ui-mode="${id}" aria-pressed="${html.dataset.uiMode===id}"><span class="ui-style-preview ${id}-preview" aria-hidden="true"><i></i><i></i><i></i></span><strong>${label}</strong><small>${description}</small></button>`).join('')}</div></section>
       <section class="appearance-section"><div class="appearance-section-heading"><h3>字体大小</h3><span>立即预览，自动保存，重开保留</span></div><label class="field">字号（12–22）<input id="appearance-font-size" type="range" min="12" max="22" step="1" value="${interfaceSettings?.fontSize??14}"><output id="appearance-font-value">${interfaceSettings?.fontSize??14}px</output></label><button class="button small" id="appearance-font-reset">恢复标准字号</button><p class="subtle">放大页面文字、按钮和表单；不改变发送给聊天对象的文字格式。</p></section><section class="appearance-section"><div class="appearance-section-heading"><h3>显示模式</h3><span>明亮或沉静，都清晰舒适</span></div><div class="appearance-modes" role="group" aria-label="显示模式">${[['light','sun','浅色'],['dark','moon','深色']].map(([theme,symbol,label])=>`<button class="appearance-mode" data-appearance-theme="${theme}" aria-pressed="${document.documentElement.dataset.theme===theme}">${icon(symbol)}${label}</button>`).join('')}</div></section>
       <section class="appearance-section"><div class="appearance-section-heading"><h3>灵感配色</h3><span id="appearance-preset-label">${colors.presets.find(([,a,b])=>a===current.accent&&b===current.background)?.[0] || '自定义'}</span></div><div class="appearance-presets" role="group" aria-label="预设配色">${colors.presets.map(([name,a,b],i)=>`<button class="appearance-swatch" data-color-preset="${i}" aria-label="${name}配色" aria-pressed="${a===current.accent&&b===current.background}"><span aria-hidden="true"><i></i><i></i><i></i></span><strong>${name}</strong></button>`).join('')}</div>
       <div class="appearance-colors">${[['accent','主题色'],['background','背景底色']].map(([key,label])=>`<div class="appearance-color-field"><label for="appearance-${key}">${label}</label><div><input type="color" id="appearance-${key}" value="${current[key]}" aria-label="选择${label}"><input type="text" id="appearance-${key}-hex" value="${current[key]}" maxlength="7" spellcheck="false" aria-label="${label}十六进制色值" aria-describedby="appearance-color-help"></div></div>`).join('')}</div><p class="subtle" id="appearance-color-help">支持 #RRGGBB 色值。背景底色会柔和融入界面，按钮文字自动适配对比度。</p>
@@ -36,6 +68,7 @@ export function initAppearance({ api, modal, closeModal, toast, escapeHtml, icon
       <p class="appearance-note">图片仅保存在本机，不会发送给模型。</p></section>` : '<p class="appearance-note">桌面版还支持选择本地图片作为背景。</p>'}
       <p id="appearance-error" class="inline-error" role="alert" hidden></p>
       <div class="modal-actions"><button class="button" id="appearance-done">完成</button></div>`);
+    document.querySelectorAll('.ui-style-choice[data-ui-mode]').forEach(el=>el.addEventListener('click',()=>void switchMode(el.dataset.uiMode)));
     document.querySelectorAll('[data-color-preset]').forEach(el=>{const [,a,b]=colors.presets[Number(el.dataset.colorPreset)];const preview=el.querySelector('span');preview.style.setProperty('--swatch',a);preview.style.setProperty('--swatch-bg',b);});
     const error = message => { const el = document.getElementById('appearance-error'); if(el){el.hidden=false;el.textContent=message;} };
     let fontSaving;

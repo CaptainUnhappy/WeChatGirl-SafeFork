@@ -1,4 +1,4 @@
-import {requestedSongMode} from '../voice-studio/music-preferences.mjs';
+import {requestedSongMode,MusicPreferences} from '../voice-studio/music-preferences.mjs';
 import {AssistantNotifications} from './assistant-notifications.mjs';
 import {conversationModel,modelCatalog,bindConversationModel} from './model-routing.mjs';
 import {apply as applyAssistantToolGuard,bindScopedToolPresentation} from './social-tool-restrict.mjs';
@@ -164,7 +164,7 @@ export function apply(ctx, config={}) {
   let extensionPromise;
   async function extensions() {
     if(internalGroupChat)return null; // Member chat never gains task tools.
-    extensionPromise??=import('../plugin-api/index.mjs').then(sdk=>{const publicMedia=createPublicMedia({neteaseClient:createNeteaseClient(root)});return {sdk,runtime:new sdk.PluginRuntime({root,accountScope:loadedAccount.id||loadedAccount.legacyId||'unbound',isAllowed:accountReady,
+    extensionPromise??=import('../plugin-api/index.mjs').then(sdk=>{const publicMedia=createPublicMedia({neteaseClient:createNeteaseClient(root),musicOrder:()=>new MusicPreferences(root).snapshot().order});return {sdk,runtime:new sdk.PluginRuntime({root,accountScope:loadedAccount.id||loadedAccount.legacyId||'unbound',isAllowed:accountReady,
       personaFor:key=>localPersona(root,key),rowsForDate:pluginRowsForDate,isBusy:key=>key?!!mappings[key]&&(pending.has(mappings[key])||ctx.agents.get(mappings[key])?.status==='running'):pending.size>0,
       canSchedule:()=>{try{const state=JSON.parse(fs.readFileSync(path.join(root,'state/runtime.json'),'utf8').replace(/^\uFEFF/,''));return ['bridge','adapter'].every(name=>{const pid=state[name]?.pid;if(!Number.isSafeInteger(pid)||pid<1)return false;try{process.kill(pid,0);return true;}catch{return false;}});}catch{return false;}},
       taskControl:(action,body)=>assistantControl(action,body),

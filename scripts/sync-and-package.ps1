@@ -1,5 +1,5 @@
 param(
- [string]$Version='0.5.13',
+ [string]$Version='0.5.14',
  [string]$Baseline='D:\weixiagen\release\archive\WeChatAgent-0.4.3',
  [string]$ClientRoot='D:\weixiagen\data\workspace\state\hook\wechat-4.1.15.13',
  [string]$HookRoot='D:\weixiagen\data\workspace\state\hook\native-4.1.15.13',

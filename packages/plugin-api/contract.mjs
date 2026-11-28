@@ -105,7 +105,7 @@ export const PLUGIN_HOST_FILES = Object.freeze([
   'packages/plugin-api/daily-schedule.mjs',
   'packages/plugin-api/model-utility.mjs', 'packages/plugin-api/audio.mjs',
   'packages/plugin-api/sensevoice.mjs','scripts/sensevoice-worker.py',
-  'packages/public-media/index.mjs', 'packages/dsh-social-bridge-plugin/search-provider.mjs',
+  'packages/public-media/index.mjs', 'packages/public-media/music-catalog.mjs', 'packages/public-media/music-accounts.mjs', 'packages/public-media/music-account-format.cjs', 'packages/dsh-social-bridge-plugin/search-provider.mjs',
   'packages/plugin-api/voice-status.mjs',
   'packages/plugin-api/people-memory.mjs', 'packages/plugin-api/people-facts.mjs', 'packages/dsh-social-bridge-plugin/member-memory.mjs', 'packages/plugin-api/admin-dsh.mjs',
   'packages/voice-studio/jobs.mjs', 'packages/voice-studio/singing.mjs', 'packages/voice-studio/original.mjs',

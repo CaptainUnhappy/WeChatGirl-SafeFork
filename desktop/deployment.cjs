@@ -4,29 +4,39 @@ const fs = process.versions.electron ? require('original-fs') : require('node:fs
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-async function upgradeBundledVoiceStudio(workspace,bundle){
+const musicPluginUpgrades = {
+  'netease-music': {
+    '1.1.0':'c02f5d6dbbd66e1ac91463143dd95c54a8debf3c56460a9b283303d7b662ca12',
+  },
+  'voice-studio': {
+    '1.4.1':'b1c8148991222c4a5c82c777c9fe46453cf2992d1c51cb6dc3fe05ec068abe0e',
+    '1.5.0':'ad77d470bc22a13a98a24373000d3ce9574342585023c3a785a08cd13ebc862c',
+  },
+};
+
+async function upgradeBundledMusicPlugin(workspace,bundle){
   const {pathToFileURL}=require('node:url');
   const api=relative=>import(pathToFileURL(path.join(workspace,'packages/plugin-api',relative)).href);
   const {inspectPackage,directory}=await api('catalog.mjs');
-  const target=path.join(workspace,'plugins','voice-studio');
-  if(!fs.existsSync(target)||fs.lstatSync(path.dirname(target)).isSymbolicLink())return false;
+  const target=path.join(workspace,'plugins',bundle.id);
+  if(!fs.existsSync(target)||[path.dirname(target),target].some(file=>fs.lstatSync(file).isSymbolicLink()))return false;
   let current;try{current=inspectPackage(target);}catch{return false;}
-  // Only update the official 1.4.1 payload. Keep customised plugins and all existing permissions/settings.
-  if(current.revision!=='b1c8148991222c4a5c82c777c9fe46453cf2992d1c51cb6dc3fe05ec068abe0e')return false;
+  // Source revisions identify untouched first-party archives. Existing permissions and settings stay in the catalog.
+  if(current.id!==bundle.id||musicPluginUpgrades[bundle.id][current.version]!==current.revision)return false;
   const {unpackZip}=await api('zip.mjs');
   const parent=directory(workspace,'state/plugin-archives');
-  const staged=fs.mkdtempSync(path.join(parent,'voice-studio-upgrade-'));
+  const staged=fs.mkdtempSync(path.join(parent,bundle.id+'-upgrade-'));
   try{
     for(const file of unpackZip(fs.readFileSync(path.join(workspace,bundle.zip)))){
       const destination=path.join(staged,file.name);
       fs.mkdirSync(path.dirname(destination),{recursive:true});fs.writeFileSync(destination,file.data,{flag:'wx'});
     }
     const next=inspectPackage(staged);
-    if(next.id!=='voice-studio'||next.version!==bundle.version||
+    if(next.id!==bundle.id||next.version!==bundle.version||
       JSON.stringify(next.permissions)!==JSON.stringify(current.permissions)||
       JSON.stringify(next.settings)!==JSON.stringify(current.settings)||
-      JSON.stringify(next.configSchema)!==JSON.stringify(current.configSchema))throw Error('声音工作室迁移清单不兼容。');
-    const backup=path.join(parent,'voice-studio-1.4.1-'+crypto.randomUUID());
+      JSON.stringify(next.configSchema)!==JSON.stringify(current.configSchema))throw Error('音乐插件升级清单不兼容。');
+    const backup=path.join(parent,bundle.id+'-'+current.version+'-'+crypto.randomUUID());
     fs.renameSync(target,backup);
     try{fs.renameSync(staged,target);}catch(error){fs.renameSync(backup,target);throw error;}
     return true;
@@ -148,7 +158,7 @@ async function bootstrapDeployment(resourcesPath, dataHome, progress = () => {},
             finally{if(fs.existsSync(staging))fs.unlinkSync(staging);}
           }
         }
-        if(id==='voice-studio'&&bundle.version==='1.5.0')await upgradeBundledVoiceStudio(workspace,bundle);
+        if(Object.hasOwn(musicPluginUpgrades,id))await upgradeBundledMusicPlugin(workspace,bundle);
         if(bundledPlugins.has(id)||bundle.defaultEnabled&&defaultPlugins.has(id)||!includesAll&&!firstInstall&&!bundle.defaultEnabled)continue;
         if(fs.existsSync(path.join(workspace,'plugins',id))){bundledPlugins.add(id);if(bundle.defaultEnabled)defaultPlugins.add(id);continue;}
         const preview=installer.inspect({name:id+'.zip',zip:fs.readFileSync(path.join(workspace,bundle.zip)).toString('base64')});

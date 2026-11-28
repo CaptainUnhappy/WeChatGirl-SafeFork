@@ -5,7 +5,7 @@ import {resolveSpeechEngine} from './cosyvoice.mjs';
 import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';
 import {readSendingMode} from '../wechat-send-policy.mjs';
 import {configuration,allowedChat,directory,atomicJson,json} from '../plugin-api/catalog.mjs';
-import {mediaLink} from '../public-media/index.mjs';
+import {songLink} from '../public-media/index.mjs';
 import {SavedSongs} from './saved-songs.mjs';
 import {CustomVoices,validateVoiceProfile} from './voices.mjs';
 import {SpeechApi} from './speech-api.mjs';
@@ -28,7 +28,7 @@ export function voiceRequest(value){
     return original;
   }
   let sourceUrl;
-  if(value.sourceUrl!==undefined){try{const link=mediaLink('netease',value.sourceUrl);if(kind!=='song'||link.kind!=='song')throw Error();sourceUrl=link.url;}catch{throw voiceError('VOICE_SONG_LINK_INVALID');}}
+  if(value.sourceUrl!==undefined){try{const link=songLink(value.sourceUrl);if(kind!=='song'||link.kind!=='song')throw Error();sourceUrl=link.url;}catch{throw voiceError('VOICE_SONG_LINK_INVALID');}}
   if(kind==='song'&&([value.title??'',value.artist??''].some(text=>typeof text!=='string'||text.length>100||/[\u0000-\u001f\u007f]/.test(text))||!sourceUrl&&!value.title?.trim()))throw voiceError('VOICE_SONG_INVALID');
   if(kind==='speech'&&(typeof value.text!=='string'||!value.text.trim()||value.text.length>220))throw voiceError('VOICE_TEXT_LIMIT');
   if(kind==='cover'&&(typeof value.songId!=='string'||!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(value.songId)))throw voiceError('VOICE_SONG_INVALID');

@@ -1,11 +1,11 @@
 {
   "id": "netease-music",
   "name": "网易云音乐",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "apiVersion": 2,
   "host": "wechatagent",
   "author": "WeChatGirl",
-  "description": "网易云站内搜索歌曲、读取歌曲与公开歌单。音乐工作台支持扫码登录，后台按账号实际权限读取音源；登录凭据只保存在本机，不交给聊天模型。",
+  "description": "按音乐工作台的顺序搜索网易云、QQ 音乐和酷狗，读取歌曲资料与网易云公开歌单。音乐工作台支持扫码登录，后台按账号实际权限读取音源；登录凭据只保存在本机，不交给聊天模型。",
   "permissions": [
     "web_fetch"
   ],

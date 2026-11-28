@@ -6,18 +6,22 @@ import crypto from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {directory,atomicJson,json} from '../plugin-api/catalog.mjs';
 import {voiceError} from './jobs.mjs';
-import {mediaLink,createPublicMedia} from '../public-media/index.mjs';
+import {mediaLink,songLink,createPublicMedia} from '../public-media/index.mjs';
+
+import {createMusicAccounts} from '../public-media/music-accounts.mjs';
+import {MusicPreferences} from './music-preferences.mjs';
+import {DEFAULT_MUSIC_ORDER,externalMediaHost,externalMusicDetail,searchExternalMusic,validTrackId} from '../public-media/music-catalog.mjs';
 
 const digest=value=>crypto.createHash('sha256').update(value).digest('hex');
 export const songName=value=>String(value??'').normalize('NFKC').toLowerCase().replace(/[\s·•《》「」“”"'，,。.!！?？-]/g,'');
 const artistName=value=>songName(value).replace(/[.．]/g,'').replace(/^gem(?=[\p{Script=Han}])/u,'');
 const mediaHost=host=>/^(?:[a-z0-9-]+\.)*music\.126\.net$/.test(host);
-export async function musicFetch(url,{fetcher=fetch,signal,maxBytes=1024*1024,media=false}={}){
+export async function musicFetch(url,{fetcher=fetch,signal,maxBytes=1024*1024,media=false,platform='netease'}={}){
   signal=AbortSignal.any([AbortSignal.timeout(45000),...(signal?[signal]:[])]);
   for(let redirects=0;redirects<4;redirects++){
     const target=new URL(url);
-    if(target.protocol!=='https:'||target.username||target.password||target.port||!(media?mediaHost(target.hostname):target.hostname==='music.163.com'))throw voiceError('SONG_SOURCE_UNSAFE');
-    const response=await fetcher(target.href,{signal,redirect:'manual',headers:{'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36','Referer':'https://music.163.com/'}});
+    if(target.protocol!=='https:'||target.username||target.password||target.port||!(media?(platform==='netease'?mediaHost(target.hostname):externalMediaHost(platform,target.hostname)):target.hostname==='music.163.com'))throw voiceError('SONG_SOURCE_UNSAFE');
+    const response=await fetcher(target.href,{signal,redirect:'manual',headers:{'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36','Referer':({netease:'https://music.163.com/',qq:'https://y.qq.com/',kugou:'https://www.kugou.com/'})[platform]}});
     if(response.status>=300&&response.status<400){await response.body?.cancel();const location=response.headers.get('location');if(!location)throw voiceError('SONG_SOURCE_UNAVAILABLE');url=new URL(location,target).href;continue;}
     if(!response.ok){await response.body?.cancel();throw voiceError('SONG_SOURCE_UNAVAILABLE');}
     const chunks=[];let size=0;
@@ -53,9 +57,34 @@ export async function findSong(title,artist='',{fetcher=fetch,signal,neteaseClie
   const found=JSON.parse((await musicFetch('https://music.163.com/api/song/detail?ids='+encodeURIComponent('['+ids.join(',')+']'),{fetcher,signal})).toString('utf8'));
   if(found.code!==200)throw voiceError('SONG_SEARCH_UNAVAILABLE');return playableSong(chooseSong(found.songs??[],title,artist),{fetcher,signal,neteaseClient});
 }
-function verifiedPrepared(folder,sourceId){
+export async function findOrderedSong(order,title,artist,{fetcher,signal,neteaseClient,accounts,find=findSong,search=searchExternalMusic,detail=externalMusicDetail}={}){
+  let failure;
+  const query=[title,artist].filter(Boolean).join(' ').slice(0,100);
+  for(const platform of order){
+    signal?.throwIfAborted();
+    const options={fetcher,neteaseClient,accounts,signal:AbortSignal.any([AbortSignal.timeout(8500),...(signal?[signal]:[])])};
+    try{
+      if(platform==='netease')return await find(title,artist,options);
+      const songs=await search(platform,query,15,options);
+      const match=songs.find(item=>songName(item.title)===songName(title)&&(!artist||item.artists.some(name=>artistName(name)===artistName(artist))));
+      if(!match)throw voiceError('SONG_EXACT_MATCH_NOT_FOUND');
+      const track=await detail(platform,match.id,{...options,audio:true});
+      if(songName(track.title)!==songName(match.title)||artist&&!track.artists.some(name=>artistName(name)===artistName(artist)))throw voiceError('SONG_EXACT_MATCH_NOT_FOUND');
+      return track;
+    }catch(error){
+      if(signal?.aborted)throw error;
+      if(!failure||['SONG_EXACT_MATCH_NOT_FOUND','SONG_SEARCH_UNAVAILABLE'].includes(failure.code))failure=error.code?.startsWith('SONG_')?error:voiceError('SONG_SEARCH_UNAVAILABLE');
+    }
+  }
+  throw failure??voiceError('SONG_EXACT_MATCH_NOT_FOUND');
+}
+export async function trackForLink(link,{findById=songById,...options}={}){
+  return link.platform==='netease'?findById(link.id,options):externalMusicDetail(link.platform,link.id,{...options,audio:true});
+}
+function verifiedPrepared(folder,link){
   try{const file=path.join(folder,'song.json');if(fs.lstatSync(folder).isSymbolicLink()||fs.lstatSync(file).isSymbolicLink()||fs.statSync(file).size>65536)return null;
-    const meta=json(file);if(meta.version!==1||meta.provider!=='netease-public'||sourceId&&meta.sourceId!==sourceId)return null;
+    const meta=json(file);const platform=meta.provider==='netease-public'?'netease':meta.provider;
+    if(meta.version!==1||!validTrackId(platform,meta.sourceId)||link&&(platform!==link.platform||meta.sourceId!==link.id))return null;
     for(const name of ['vocals.wav','instrumental.wav']){const stem=path.join(folder,name);if(fs.lstatSync(stem).isSymbolicLink()||fs.statSync(stem).size>140*1024*1024||digest(fs.readFileSync(stem))!==meta.hashes?.[name])return null;}
     return {...meta,folder};
   }catch{return null;}
@@ -78,24 +107,34 @@ export function runMusicTool(executable,args,{cwd,signal,timeoutMs=480000,onProg
   });
 }
 export async function prepareSong(root,request,{fetcher=fetch,signal,find=findSong,findById=songById,run=runMusicTool,onProgress=()=>{}}={}){
-  const link=request.sourceUrl?mediaLink('netease',request.sourceUrl):null;if(link&&link.kind!=='song')throw voiceError('VOICE_SONG_LINK_INVALID');
+  const link=request.sourceUrl?songLink(request.sourceUrl):null;
   const playback=songPlayback(request.playbackMode);
-  const key=digest(playback.mode+':v2:'+(link?'netease-id:'+link.id:songName(request.title)+'\0'+songName(request.artist))),folder=directory(root,'state/voice/music-cache/'+key),metaFile=path.join(folder,'song.json');
-  const prepared=verifiedPrepared(folder,link?.id);if(prepared)return prepared;
+  const order=new MusicPreferences(root).snapshot().order;
+  const orderKey=DEFAULT_MUSIC_ORDER.every((name,i)=>order[i]===name)?'':order.join(',')+':';
+  const key=digest(playback.mode+':v2:'+(link?link.platform+'-id:'+link.id:orderKey+songName(request.title)+'\0'+songName(request.artist))),folder=directory(root,'state/voice/music-cache/'+key),metaFile=path.join(folder,'song.json');
+  const prepared=verifiedPrepared(folder,link);if(prepared)return prepared;
   // Reuse only locally retained public stems with exact platform ID and hashes.
-  if(link){const base=directory(root,'state/voice/music-cache');for(const name of fs.readdirSync(base).filter(name=>/^[a-f0-9]{64}$/.test(name)).slice(0,128)){const old=verifiedPrepared(path.join(base,name),link.id);if(old&&old.playbackMode===playback.mode)return old;}}
-  onProgress('source');const neteaseClient=createNeteaseClient(root,{fetcher:fetcher===fetch?undefined:fetcher});const track=link?await findById(link.id,{fetcher,signal,neteaseClient}):await find(request.title,request.artist??'',{fetcher,signal,neteaseClient});
+  if(link){const base=directory(root,'state/voice/music-cache');for(const name of fs.readdirSync(base).filter(name=>/^[a-f0-9]{64}$/.test(name)).slice(0,128)){const old=verifiedPrepared(path.join(base,name),link);if(old&&old.playbackMode===playback.mode)return old;}}
+  onProgress('source');const neteaseClient=createNeteaseClient(root,{fetcher:fetcher===fetch?undefined:fetcher});const accounts=createMusicAccounts(root);
+  const track=link?await trackForLink(link,{fetcher,signal,neteaseClient,accounts,findById}):await findOrderedSong(order,request.title,request.artist??'',{fetcher,signal,neteaseClient,accounts,find});
+  const platform=track.platform??'netease';
   if(link&&track.id!==link.id)throw voiceError('SONG_EXACT_MATCH_NOT_FOUND');
   if(playback.mode==='full'&&(!Number.isFinite(track.durationSeconds)||track.durationSeconds<=0||track.durationSeconds>playback.maxSeconds))throw voiceError('SONG_FULL_DURATION_UNSUPPORTED');
-  onProgress('download');const audio=await musicFetch(track.url,{fetcher,signal,media:true,maxBytes:140*1024*1024});
+  onProgress('download');const audio=await musicFetch(track.url,{fetcher,signal,media:true,platform,maxBytes:140*1024*1024});
+  if(platform!=='netease'&&(!Number.isSafeInteger(track.expectedBytes)||track.expectedBytes!==audio.length))throw voiceError('SONG_SOURCE_INCOMPLETE');
   const source=path.join(folder,'source.audio');fs.writeFileSync(source,audio,{mode:0o600});
   const startSeconds=playback.mode==='full'?0:track.durationSeconds>120?30:0,clip=path.join(folder,'clip.wav');
-  await run(path.join(root,'state/voice/tools/ffmpeg.exe'),['-hide_banner','-loglevel','error','-nostdin','-y','-ss',String(startSeconds),'-i',source,'-t',String(playback.maxSeconds),'-ar','44100','-ac','2',clip],{signal,timeoutMs:60000});
+  await run(path.join(root,'state/voice/tools/ffmpeg.exe'),['-hide_banner','-loglevel','error','-nostdin','-y','-ss',String(startSeconds),'-i',source,'-t',String(playback.maxSeconds),'-ar','44100','-ac','2','-c:a','pcm_s16le',clip],{signal,timeoutMs:60000});
+  if(platform!=='netease'){
+    // FFmpeg outputs stereo signed 16-bit PCM at 44100 Hz. Reject unexpectedly short streams before conversion.
+    const expected=Math.min(playback.maxSeconds,track.durationSeconds-startSeconds);
+    if(fs.statSync(clip).size<Math.max(1,expected-2)*44100*4)throw voiceError('SONG_TRIAL_ONLY');
+  }
   const python=path.join(root,'state/voice/engines/music/venv/Scripts/python.exe');
   if(!fs.existsSync(python))throw voiceError('SONG_SEPARATOR_NOT_INSTALLED');
   onProgress('separate');await run(python,['-B',path.join(root,'scripts/separate-song.py'),'--input',clip,'--output',folder,'--models',directory(root,'state/voice/engines/music/models')],{signal,onProgress});
   const hashes={};for(const name of ['vocals.wav','instrumental.wav']){const file=path.join(folder,name);if(!fs.existsSync(file)||fs.lstatSync(file).isSymbolicLink()||fs.statSync(file).size>140*1024*1024)throw voiceError('SONG_STEMS_INVALID');hashes[name]=digest(fs.readFileSync(file));}
-  const meta={version:1,provider:'netease-public',sourceId:track.id,title:track.title,artist:track.artist,startSeconds,maxSeconds:playback.maxSeconds,playbackMode:playback.mode,hashes,preparedAt:Date.now()};atomicJson(metaFile,meta);return {...meta,folder};
+  const meta={version:1,provider:platform==='netease'?'netease-public':platform,sourceId:track.id,title:track.title,artist:track.artist,startSeconds,maxSeconds:playback.maxSeconds,playbackMode:playback.mode,hashes,preparedAt:Date.now()};atomicJson(metaFile,meta);return {...meta,folder};
 }
 export function songMixFilter({clarity=true,backingVolume=0.4}={}){
   if(typeof clarity!=='boolean'||!Number.isFinite(backingVolume)||backingVolume<0||backingVolume>1)throw voiceError('SONG_MIX_INVALID');

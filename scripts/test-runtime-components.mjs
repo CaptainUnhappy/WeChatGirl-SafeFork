@@ -65,7 +65,7 @@ test('4.1.15.13 first deployment installs the matching client and verified sende
 test('packaged group mute is enabled on fresh installs and upgrades while explicit settings survive',async t=>{
  const root=fixture(t),resources=path.join(root,'resources'),project=path.join(resources,'project');
  const files=['config/wechatagent.example.json','packages/plugin-api/bundled.mjs','packages/plugin-api/catalog.mjs','packages/plugin-api/installer.mjs','packages/plugin-api/zip.mjs',
-   'packages/plugin-api/contract.mjs','packages/plugin-api/settings-protection.mjs','packages/extension-runtime/catalog.mjs','packages/netease/credential.ps1','optional-extensions/packages/group-mute-1.0.0.zip'];
+   'packages/plugin-api/contract.mjs','packages/plugin-api/settings-protection.mjs','packages/extension-runtime/catalog.mjs','packages/netease/credential.ps1','optional-extensions/packages/group-mute-1.1.0.zip'];
  const projectConfig={runtime:{},wechat:{whitelist:{private:[],groups:['123']}}};
  write(path.join(project,files[0]),JSON.stringify(projectConfig));
  for(const file of files.slice(1))write(path.join(project,file),fs.readFileSync(path.resolve(file)));

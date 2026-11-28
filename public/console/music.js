@@ -6,9 +6,78 @@ export const VOICE_PRESETS=Object.freeze({
  conversion:Object.freeze({name:'肥鱼·明亮换声',baseStyle:'cute',pitch:3,speed:1,feiyu:true,instruction:'自然清晰地说话。',referenceText:'',volume:1,bassDb:-1.5,trebleDb:0.8,normalize:false,trimSilence:false,cfgScale:1,temperature:0,seed:42})
 });
 export function mountMusicPage(element,{api,esc,toast,chats=[]}){
-  element.innerHTML=`<div data-m-components-top hidden></div><p data-m-send-mode class="notice plain" hidden></p><section class="card music-account-card"><div class="card-header"><div><h2>网易云音乐</h2><p class="card-description">在网易云站内搜索，读取准确的歌曲版本。手机扫码后，后台点歌与翻唱可使用此账号的登录状态。</p></div><a class="button" href="#extensions">插件设置</a></div><p data-m-account>正在读取登录状态…</p><div class="actions music-login-actions"><button class="button primary" data-m-official>官方窗口登录</button><button class="button" data-m-verify>检查登录状态</button><section class="music-login-more"><h3 class="button">其他登录选项</h3><div class="actions"><button class="button" data-m-login>备用扫码登录</button><button class="button" data-m-logout hidden>退出登录</button></div></section></div><div data-m-qr hidden><img class="music-login-qr" data-m-image alt="使用网易云音乐手机应用扫码登录"><p data-m-qr-status aria-live="polite"></p><button type="button" class="button" data-m-cancel>取消扫码</button></div><p class="subtle">登录凭据经 Windows 加密保存在本机，不会交给聊天模型。歌曲是否可读取以网易云返回的权限为准。</p></section><section class="card space-top"><h2>音乐来源与接入进度</h2><p>网易云：已接入站内搜索、登录与账号允许的完整音源。QQ音乐、酷狗：目前提供官方搜索入口，音源读取与翻唱接入待完成。</p><div class="actions"><a class="button" href="https://y.qq.com/" target="_blank" rel="noopener noreferrer">QQ音乐官方入口</a><a class="button" href="https://www.kugou.com/" target="_blank" rel="noopener noreferrer">酷狗官方入口</a></div><p class="subtle">其他平台链接暂不能当作网易云链接点唱；不会显示虚假的制作进度。</p></section><section class="card space-top"><h2>搜索歌曲</h2><p class="subtle">选择后点击“保存为默认方式”，之后聊天里普通点歌会沿用。点歌时说“只唱1分钟”或“完整唱一遍”可临时覆盖，不修改默认。</p><label class="field">歌曲发送方式<select data-m-playback><option value="preview">1分钟片段 · 只处理60秒</option><option value="full">完整翻唱 · 每段最长55秒</option></select><small>1分钟片段：先裁取最多60秒再分离、换声，只发送一条语音并标明片段。完整翻唱：整首处理，按顺序拆成每段最长55秒；当前支持10分钟以内歌曲。歌曲不足1分钟时按实际长度发送。</small></label><div class="actions"><button type="button" class="button" data-m-save-playback disabled>保存为默认方式</button><span data-m-playback-status role="status">正在读取默认方式…</span></div><label class="field">歌曲接收聊天<select data-m-target><option value="">请选择已授权的聊天</option>${chats.map(chat=>`<option value="${esc(chat.key)}">${esc(chat.name)}</option>`).join('')}</select></label><form data-m-form><label class="field">歌名或歌手<input data-m-query maxlength="100" placeholder="例如：周杰伦 晴天" required></label><button class="button primary" data-m-search>去网易云搜索</button></form><p data-m-search-status aria-live="polite"></p><div data-m-results></div><p class="subtle">复制点歌指令到已授权的聊天，即可用肥鱼音色演唱对应版本；制作完成后自动进入本机曲库。</p></section><section class="card space-top music-library-card"><h2>本机曲库 <span data-m-count></span></h2><p class="subtle">整首翻唱的所有分段合并显示为一首。悬停或点按歌名查看详情，正在使用的歌曲暂不能删除。</p><label class="field">查找已加载音乐<input type="search" data-m-filter placeholder="输入歌名或歌手"></label><div class="music-library-actions"><label class="extension-option"><input type="checkbox" data-m-select-all>全选当前结果</label><span data-m-selection role="status">未选择</span><button class="button" data-m-clear-selection>取消勾选</button><button class="button danger" data-m-delete-selected disabled>删除所选</button></div><div class="music-retention"><label class="field">生成成品最多保留几首<input data-m-max-songs type="number" min="0" max="500" step="1" value="0"><small>0不限制；超过上限自动清理最旧且未在使用的成品，整曲按1首计算。导入的人声素材不会自动删除。</small></label><button class="button" data-m-save-retention>保存保留数量</button><span data-m-retention-status role="status"></span></div><div data-m-songs aria-live="polite"></div></section><section class="card space-top"><h3>翻唱与混音设置</h3><div data-m-singing-settings></div></section><p class="inline-error" data-m-error role="alert"></p>`;
+  element.innerHTML=`<div data-m-components-top hidden></div><p data-m-send-mode class="notice plain" hidden></p><section class="card music-account-card"><div class="card-header"><div><h2>网易云音乐</h2><p class="card-description">在网易云站内搜索，读取准确的歌曲版本。手机扫码后，后台点歌与翻唱可使用此账号的登录状态。</p></div><a class="button" href="#extensions">插件设置</a></div><p data-m-account>正在读取登录状态…</p><div class="actions music-login-actions"><button class="button primary" data-m-official>官方窗口登录</button><button class="button" data-m-verify>检查登录状态</button><section class="music-login-more"><h3 class="button">其他登录选项</h3><div class="actions"><button class="button" data-m-login>备用扫码登录</button><button class="button" data-m-logout hidden>退出登录</button></div></section></div><div data-m-qr hidden><img class="music-login-qr" data-m-image alt="使用网易云音乐手机应用扫码登录"><p data-m-qr-status aria-live="polite"></p><button type="button" class="button" data-m-cancel>取消扫码</button></div><p class="subtle">登录凭据经 Windows 加密保存在本机，不会交给聊天模型。歌曲是否可读取以网易云返回的权限为准。</p></section><section class="card space-top music-external-accounts"><h2>QQ 音乐与酷狗音乐账号</h2><p class="card-description">在平台官方窗口登录后，点歌和检查音源会自动使用本机保存的账号。可用歌曲和音质由平台授权决定。</p><div class="music-account-grid" data-m-provider-accounts></div><p class="subtle">登录凭据经 Windows 加密保存在本机。可分别退出两个账号。</p></section><section class="card space-top"><h2>歌曲搜索顺序</h2><p class="card-description">自动搜索按从上到下的顺序查找，遇到没结果或不可用的平台就继续。聊天点歌还会核对歌名、歌手和完整音源；贴具体歌曲链接时按该链接指定版本处理。</p><ol class="music-provider-order" data-m-order></ol><div class="actions"><button type="button" class="button" data-m-save-order disabled>保存搜索顺序</button><span data-m-order-status role="status">正在读取搜索顺序…</span></div><p class="subtle">网易云可在上方登录。QQ 音乐和酷狗可以分别登录；遇到试听或版权限制时会提示。</p></section><section class="card space-top"><h2>搜索歌曲</h2><p class="subtle">选择后点击“保存为默认方式”，之后聊天里普通点歌会沿用。点歌时说“只唱1分钟”或“完整唱一遍”可临时覆盖，不修改默认。</p><label class="field">歌曲发送方式<select data-m-playback><option value="preview">1分钟片段 · 只处理60秒</option><option value="full">完整翻唱 · 每段最长55秒</option></select><small>1分钟片段：先裁取最多60秒再分离、换声，只发送一条语音并标明片段。完整翻唱：整首处理，按顺序拆成每段最长55秒；当前支持10分钟以内歌曲。歌曲不足1分钟时按实际长度发送。</small></label><div class="actions"><button type="button" class="button" data-m-save-playback disabled>保存为默认方式</button><span data-m-playback-status role="status">正在读取默认方式…</span></div><label class="field">歌曲接收聊天<select data-m-target><option value="">请选择已授权的聊天</option>${chats.map(chat=>`<option value="${esc(chat.key)}">${esc(chat.name)}</option>`).join('')}</select></label><form data-m-form><label class="field">歌名或歌手<input data-m-query maxlength="100" placeholder="例如：周杰伦 晴天" required></label><label class="field">搜索平台<select data-m-provider><option value="auto">自动 · 按保存顺序</option><option value="netease">网易云音乐</option><option value="qq">QQ 音乐</option><option value="kugou">酷狗音乐</option></select></label><button class="button primary" data-m-search>搜索歌曲</button></form><p data-m-search-status aria-live="polite"></p><div data-m-results></div><p class="subtle">复制点歌指令到已授权的聊天，即可用肥鱼音色演唱对应版本；制作完成后自动进入本机曲库。</p></section><section class="card space-top music-library-card"><h2>本机曲库 <span data-m-count></span></h2><p class="subtle">整首翻唱的所有分段合并显示为一首。悬停或点按歌名查看详情，正在使用的歌曲暂不能删除。</p><label class="field">查找已加载音乐<input type="search" data-m-filter placeholder="输入歌名或歌手"></label><div class="music-library-actions"><label class="extension-option"><input type="checkbox" data-m-select-all>全选当前结果</label><span data-m-selection role="status">未选择</span><button class="button" data-m-clear-selection>取消勾选</button><button class="button danger" data-m-delete-selected disabled>删除所选</button></div><div class="music-retention"><label class="field">生成成品最多保留几首<input data-m-max-songs type="number" min="0" max="500" step="1" value="0"><small>0不限制；超过上限自动清理最旧且未在使用的成品，整曲按1首计算。导入的人声素材不会自动删除。</small></label><button class="button" data-m-save-retention>保存保留数量</button><span data-m-retention-status role="status"></span></div><div data-m-songs aria-live="polite"></div></section><section class="card space-top"><h3>翻唱与混音设置</h3><div data-m-singing-settings></div></section><p class="inline-error" data-m-error role="alert"></p>`;
   const $=name=>element.querySelector('[data-m-'+name+']');let songs=[],timer,qrTimer,busy=false,qrEpoch=0,last='',wasLoggedIn=false,refreshing=false,generationBlocked=false,componentPanelMounted=false;
   let playbackPreferences=null;
+  const providerNames={netease:'网易云音乐',qq:'QQ 音乐',kugou:'酷狗音乐'};
+  let providerOrder=[];
+  const providerPanel=$('provider-accounts');
+  providerPanel.innerHTML=['qq','kugou'].map(provider=>`<section data-m-account-provider="${provider}">
+    <h3>${providerNames[provider]}</h3><p data-account-state role="status">正在读取登录状态…</p>
+    <div class="actions"><button type="button" class="button primary" data-account-action="login">官方窗口登录</button>
+      <button type="button" class="button" data-account-action="status">检查凭据</button>
+      <button type="button" class="button" data-account-action="cancel" hidden>取消登录</button>
+      <button type="button" class="button" data-account-action="logout" hidden>退出本机登录</button></div>
+  </section>`).join('');
+  function paintAccount(provider,value){
+    const card=providerPanel.querySelector('[data-m-account-provider="'+provider+'"]');
+    const controls=Object.fromEntries([...card.querySelectorAll('[data-account-action]')].map(button=>[button.dataset.accountAction,button]));
+    const state=value.login?.state??'idle';
+    const details={
+      'official-window':'请在官方窗口登录并确认授权。',
+      'waiting-playback':'账号已登录，正在等待平台发放音乐凭据。可在官方窗口打开一首歌曲后再检查。',
+      saving:'正在加密保存登录凭据…',
+      retrying:'登录尚未保存，请检查官方窗口后稍等。',
+      expired:'登录窗口已超时，请重新打开。',
+      cancelled:'已取消登录。'
+    };
+    const text=details[state]??(value.loggedIn?'登录凭据已保存 · 歌曲权限可用“检查音源”确认':value.expired?'登录已过期，请重新登录。':'尚未登录 · 仍可搜索公开歌曲');
+    const status=card.querySelector('[data-account-state]');
+    if(status.textContent!==text)status.textContent=text;
+    controls.login.disabled=!value.officialLoginAvailable;
+    controls.login.title=value.officialLoginAvailable?'':'请在 WeChatGirl 桌面程序中登录';
+    controls.login.textContent=value.loggedIn?'更换账号':'官方窗口登录';
+    controls.cancel.hidden=!['official-window','waiting-playback','saving','retrying'].includes(state);
+    controls.logout.hidden=!value.savedAt;
+  }
+  providerPanel.onclick=async event=>{
+    const button=event.target.closest('[data-account-action]');
+    if(!button||button.disabled)return;
+    const provider=button.closest('[data-m-account-provider]').dataset.mAccountProvider;
+    const operation=button.dataset.accountAction;
+    button.disabled=true;
+    try{
+      const value=await action('account-'+operation,{provider});
+      if(!element.isConnected)return;
+      if(operation==='login')await refresh();
+      else paintAccount(provider,value);
+    }catch(cause){error(cause);}
+    finally{if(element.isConnected&&operation!=='login')button.disabled=false;else if(element.isConnected)void refresh();}
+  };
+  function renderOrder(focus){
+    const list=$('order');
+    list.innerHTML=providerOrder.map((provider,i)=>'<li><span>'+providerNames[provider]+'</span><div class="actions">'+
+      '<button class="button" type="button" data-move="-1" data-provider="'+provider+'" aria-label="上移'+providerNames[provider]+'" '+(i===0?'disabled':'')+'>上移</button>'+
+      '<button class="button" type="button" data-move="1" data-provider="'+provider+'" aria-label="下移'+providerNames[provider]+'" '+(i===providerOrder.length-1?'disabled':'')+'>下移</button></div></li>').join('');
+    for(const button of list.querySelectorAll('[data-move]'))button.onclick=()=>{
+      const provider=button.dataset.provider,step=Number(button.dataset.move),from=providerOrder.indexOf(provider),to=from+step;
+      [providerOrder[from],providerOrder[to]]=[providerOrder[to],providerOrder[from]];
+      $('save-order').disabled=providerOrder.every((value,index)=>value===playbackPreferences.order[index]);
+      $('order-status').textContent=$('save-order').disabled?'正在使用已保存的顺序':'有改动，请保存后生效';
+      renderOrder({provider,step});
+    };
+    if(focus){const selector='[data-provider="'+focus.provider+'"]';(list.querySelector(selector+'[data-move="'+focus.step+'"]:not(:disabled)')??list.querySelector(selector+':not(:disabled)'))?.focus();}
+  }
+  $('save-order').onclick=async()=>{
+    const button=$('save-order');
+    button.disabled=true;
+    const list=$('order');
+    list.inert=true;
+    try{
+      playbackPreferences=await api('/api/voice-studio/music-preferences',{order:providerOrder,revision:playbackPreferences.revision});
+      $('order-status').textContent='已保存 · '+playbackPreferences.order.map(p=>providerNames[p]).join(' → ');
+    }catch(cause){error(cause);if(element.isConnected)button.disabled=false;}finally{list.inert=false;}
+  };
   async function loadPlayback(){try{playbackPreferences=await api('/api/voice-studio/music-preferences');if(!element.isConnected)return;$('playback').value=playbackPreferences.mode;$('max-songs').value=String(playbackPreferences.maxSongs??0);$('playback-status').textContent='已保存默认：'+playbackPreferences.label;$('save-playback').disabled=false;}catch(cause){error(cause);}}
   $('save-playback').onclick=async()=>{if(!playbackPreferences)return;const button=$('save-playback');button.disabled=true;try{playbackPreferences=await api('/api/voice-studio/music-preferences',{mode:$('playback').value,revision:playbackPreferences.revision});$('playback-status').textContent='已保存默认：'+playbackPreferences.label+' · 下次普通点歌沿用';toast('默认方式已保存，已排队任务保持原方式。');}catch(cause){error(cause);}finally{if(element.isConnected)button.disabled=false;}};
   $('playback').onchange=()=>{$('playback-status').textContent='本次选择已更改；点击保存才会改变下次默认。';};
@@ -30,7 +99,7 @@ export function mountMusicPage(element,{api,esc,toast,chats=[]}){
   $('select-all').onchange=event=>{for(const song of visibleSongs().filter(s=>!s.busy)){if(event.target.checked)selectedSongs.add(songKey(song));else selectedSongs.delete(songKey(song));}last='';renderSongs();};$('clear-selection').onclick=()=>{selectedSongs.clear();last='';renderSongs();};$('delete-selected').onclick=()=>deleteSongs(songs.filter(s=>selectedSongs.has(songKey(s))));
   $('save-retention').onclick=async event=>{if(!playbackPreferences)return;const maxSongs=Number($('max-songs').value);if(!Number.isInteger(maxSongs)||maxSongs<0||maxSongs>500)return error(Error('保留数量请选择0–500的整数。'));if(maxSongs&&songs.filter(s=>s.kind==='rendered-song').length>maxSongs&&!window.confirm('保存后将清理超过上限、最旧且未在使用的成品，导入的人声素材保留。确认保存？'))return;const button=event.currentTarget;button.disabled=true;try{playbackPreferences=await api('/api/voice-studio/music-preferences',{maxSongs,revision:playbackPreferences.revision});$('retention-status').textContent='已保存：'+(maxSongs?maxSongs+'首':'不限制');await refresh();}catch(cause){error(cause);}finally{if(button.isConnected)button.disabled=false;}};
   const popoverCleanup=new MutationObserver(()=>{if(!element.isConnected){clearTimeout(hideTimer);closeSong();popover.remove();popoverCleanup.disconnect();}});popoverCleanup.observe(document.body,{childList:true,subtree:true});
-  async function refresh(){if(refreshing)return;refreshing=true;clearTimeout(timer);try{const value=await api('/api/music');if(!element.isConnected)return;account(value.account);$('send-mode').hidden=value.sendingMode!=='foreground';$('send-mode').textContent='当前为前台模式：音乐搜索、登录和曲库仍可使用；原生语音和唱歌发微信已停用。需要发送歌曲语音时，请在设置中切换到 Hook 模式。';songs=value.songs;renderSongs();void checkComponents();}catch(e){error(e);}finally{refreshing=false;if(element.isConnected)timer=setTimeout(refresh,5000);}}
+  async function refresh(){if(refreshing)return;refreshing=true;clearTimeout(timer);try{const value=await api('/api/music');if(!element.isConnected)return;account(value.account);for(const [provider,status] of Object.entries(value.providers??{}))paintAccount(provider,status);$('send-mode').hidden=value.sendingMode!=='foreground';$('send-mode').textContent='当前为前台模式：音乐搜索、登录和曲库仍可使用；原生语音和唱歌发微信已停用。需要发送歌曲语音时，请在设置中切换到 Hook 模式。';songs=value.songs;renderSongs();void checkComponents();}catch(e){error(e);}finally{refreshing=false;if(element.isConnected)timer=setTimeout(refresh,5000);}}
   async function action(name,body={}){return api('/api/music/'+name,body);}
   function stopQr(){qrEpoch++;clearTimeout(qrTimer);$('qr').hidden=true;$('image').removeAttribute('src');}
   $('official').onclick=async()=>{const button=$('official');button.disabled=true;$('error').textContent='';stopQr();try{await action('official-login');toast('已打开网易云官网，请在官方窗口完成登录。');}catch(e){error(e);}finally{if(element.isConnected)button.disabled=false;}};
@@ -39,7 +108,43 @@ export function mountMusicPage(element,{api,esc,toast,chats=[]}){
   $('verify').onclick=async()=>{const button=$('verify');button.disabled=true;try{const value=await action('verify');account(value);if(value.expired)toast('登录已失效，请重新扫码。');}catch(e){error(e);}finally{if(element.isConnected)button.disabled=false;}};
   $('logout').onclick=async()=>{stopQr();try{account(await action('logout'));toast('本机登录凭据已清除。');}catch(e){error(e);}};
   $('filter').oninput=renderSongs;
-  $('form').onsubmit=async event=>{event.preventDefault();const button=$('search');button.disabled=true;$('error').textContent='';$('search-status').textContent='正在网易云搜索…';try{const value=await action('search',{query:$('query').value.trim()});if(!element.isConnected)return;$('search-status').textContent=`网易云站内搜索 · ${value.items.length} 条结果`;$('results').innerHTML=value.items.length?`<ul class="voice-song-library music-search-results">${value.items.map((s,i)=>`<li><strong>${esc(s.title)}</strong><small>${esc([s.artist,s.album,Math.round(s.durationSeconds)+'秒'].filter(Boolean).join(' · '))}</small><div class="actions"><a class="button" href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">网易云详情</a><button type="button" class="button" data-song-check="${i}">检查音源</button><button type="button" class="button" data-song-copy="${i}">复制点歌指令</button><button type="button" class="button primary" data-song-send="${i}" ${generationBlocked?'disabled title="请先导入语音组件"':''}>按所选模式制作并发送</button></div><small data-song-availability="${i}">尚未检查音源，搜索结果不代表可直接读取。</small></li>`).join('')}</ul>`:'<p>未找到歌曲，请补充歌手或换个关键词。</p>';$('results').querySelectorAll('[data-song-check]').forEach(button=>button.onclick=async()=>{const index=Number(button.dataset.songCheck),song=value.items[index],line=$('results').querySelector('[data-song-availability="'+index+'"]');button.disabled=true;line.textContent='正在向网易云检查完整音源…';try{const result=await action('check-song',{id:song.id});if(element.isConnected)line.textContent=result.message;}catch(e){error(e);if(element.isConnected)line.textContent='本次检查未完成，请稍后重试。';}finally{button.disabled=false;}});$('results').querySelectorAll('[data-song-send]').forEach(button=>button.onclick=async()=>{if(!$('target').value){toast('请先选择歌曲接收聊天。');return;}button.disabled=true;try{const song=value.items[Number(button.dataset.songSend)],job=await api('/api/voice-studio/song',{key:$('target').value,id:song.id,playbackMode:$('playback').value});$('search-status').textContent=($('playback').value==='full'?'完整翻唱 · 每段最长55秒':'1分钟片段 · 仅处理60秒')+' · 已加入制作队列：'+job.id.slice(0,12);toast('歌曲已加入队列，可在语音音色页查看进度。');}catch(e){error(e);}finally{if(element.isConnected)button.disabled=false;}});$('results').querySelectorAll('[data-song-copy]').forEach(button=>button.onclick=async()=>{const song=value.items[Number(button.dataset.songCopy)];try{await navigator.clipboard.writeText(($('playback').value==='full'?'请完整翻唱这首歌，分段发送，每段最长55秒：':'请唱这首歌的1分钟片段，只处理60秒：')+song.url);toast('已复制，粘贴到聊天即可点唱。');}catch{toast('请复制网易云详情链接到聊天点唱。');}});}catch(e){error(e);if(element.isConnected)$('search-status').textContent='搜索未完成。';}finally{if(element.isConnected)button.disabled=false;}};
+  $('form').onsubmit=async event=>{
+    event.preventDefault();
+    const button=$('search');
+    button.disabled=true;
+    $('error').textContent='';
+    $('search-status').textContent='正在搜索歌曲…';
+    $('results').replaceChildren();
+    try{
+      const value=await action('search',{query:$('query').value.trim(),provider:$('provider').value});
+      if(!element.isConnected)return;
+      const attempts=value.attempts.map(a=>providerNames[a.platform]+({ready:'有结果',empty:'无结果',unavailable:'暂不可用'})[a.status]).join(' · ');
+      $('search-status').textContent=(value.platform?providerNames[value.platform]+' · '+value.items.length+' 条结果':value.status==='restricted'?'搜索平台暂不可用':'未找到歌曲')+'（'+attempts+'）';
+      $('results').innerHTML=value.items.length?`<ul class="voice-song-library music-search-results">${value.items.map((song,i)=>`<li><strong>${esc(song.title)}</strong><small>${esc([song.artist,song.album,song.durationSeconds?Math.round(song.durationSeconds)+'秒':'',providerNames[song.platform]].filter(Boolean).join(' · '))}</small><div class="actions"><a class="button" href="${esc(song.url)}" target="_blank" rel="noopener noreferrer">平台详情</a><button type="button" class="button" data-song-action="check" data-index="${i}">检查音源</button><button type="button" class="button" data-song-action="copy" data-index="${i}">复制点歌指令</button><button type="button" class="button primary" data-song-action="send" data-index="${i}" ${generationBlocked?'disabled title="请先导入语音组件"':''}>按所选模式制作并发送</button></div><small data-song-availability="${i}" role="status">尚未检查音源。</small></li>`).join('')}</ul>`:'<p>可补充歌手、专辑名，或手动切换搜索平台。</p>';
+      for(const control of $('results').querySelectorAll('[data-song-action]'))control.onclick=async()=>{
+        const i=Number(control.dataset.index),song=value.items[i],line=$('results').querySelector('[data-song-availability="'+i+'"]');
+        const mode=$('playback').value,full=mode==='full';
+        if(control.dataset.songAction==='copy'){
+          try{await navigator.clipboard.writeText((full?'请完整翻唱这首歌，每段最长55秒：':'请唱这首歌的1分钟片段：')+song.url);toast('已复制，粘贴到聊天即可点唱。');}
+          catch{toast('请复制平台详情链接到聊天点唱。');}
+          return;
+        }
+        if(control.dataset.songAction==='send'&&!$('target').value){toast('请先选择歌曲接收聊天。');return;}
+        control.disabled=true;
+        line.textContent='正在检查'+providerNames[song.platform]+'的完整音源…';
+        try{
+          const result=await action('check-song',{sourceUrl:song.url});
+          line.textContent=result.message;
+          if(!result.playable||control.dataset.songAction==='check'||!element.isConnected)return;
+          const job=await api('/api/voice-studio/song',{key:$('target').value,sourceUrl:song.url,playbackMode:mode});
+          $('search-status').textContent=(full?'完整翻唱 · 每段最长55秒':'1分钟片段 · 仅处理60秒')+' · 已加入制作队列：'+job.id.slice(0,12);
+          toast('歌曲已加入制作队列。');
+        }catch(cause){error(cause);line.textContent='操作未完成，请稍后重试。';}
+        finally{control.disabled=false;}
+      };
+    }catch(cause){error(cause);if(element.isConnected)$('search-status').textContent='搜索未完成。';}
+    finally{if(element.isConnected)button.disabled=false;}
+  };
   void mountMusicVoiceSettings($('singing-settings'),{api,esc,toast,chats,mode:'music'});
   void refresh();
 }
@@ -59,11 +164,11 @@ export function mountVoiceComponentsPanel(element,{api,esc}){
    clearTimeout(modelTimer);
    if(!models.isConnected)return;
    try{
-     const state=await api('/api/voice-downloads'),job=state.job,active=['downloading','installing'].includes(job?.phase);
-     const html=state.items.map(item=>'<p><strong>'+esc(item.name)+'</strong> · '+(item.bytes>=1e9?(item.bytes/1e9).toFixed(2)+' GB':Math.ceil(item.bytes/1e6)+' MB')+' · '+esc(item.source)+' <a href="'+esc(item.license)+'" target="_blank" rel="noopener noreferrer">使用条款</a> <button class="button small" type="button" data-model-id="'+esc(item.id)+'" '+(active||item.exists?'disabled':'')+'>'+(item.exists?'已有本地文件':'下载并安装')+'</button></p>').join('');
+     const state=await api('/api/voice-downloads'),job=state.job,active=['downloading','installing','verifying'].includes(job?.phase);
+     const html=state.items.map(item=>'<p><strong>'+esc(item.name)+'</strong> · '+(item.bytes>=1e9?(item.bytes/1e9).toFixed(2)+' GB':Math.ceil(item.bytes/1e6)+' MB')+' · '+esc(item.source)+' <a href="'+esc(item.license)+'" target="_blank" rel="noopener noreferrer">使用条款</a> <button class="button small" type="button" data-model-id="'+esc(item.id)+'" '+(active||item.exists?'disabled':'')+'>'+(item.exists?'已有本地文件':item.id==='breeze'&&job?.id===item.id&&job.fileBytes>0?'继续下载':'下载并安装')+'</button>'+(item.id==='breeze'&&!item.exists?(item.manualUrls??[]).map((url,index)=>' <a href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">'+(index===0?'浏览器下载（镜像）':'浏览器下载（官方）')+'</a>').join(''):'')+'</p>').join('');
      if(html!==modelItems){items.innerHTML=html;modelItems=html;}
      cancel.hidden=!active;
-     if(job)progress.textContent=(active?(job.phase==='installing'?'正在安装':'正在下载')+' · '+Math.floor((job.done+job.fileBytes)*100/job.total)+'%':job.message);
+     if(job)progress.textContent=(active?(job.phase==='verifying'?'正在核对 SHA-256':job.phase==='installing'?'正在安装':'正在下载')+' · '+Math.floor((job.done+job.fileBytes)*100/job.total)+'%':job.message);
      if(active)modelTimer=setTimeout(refreshModels,1200);
      if(job?.phase==='complete'&&!modelRequest){modelRequest=true;void refresh();}
    }catch(error){progress.textContent=error.message;}
@@ -101,7 +206,7 @@ export function mountVoiceComponentsPanel(element,{api,esc}){
  $('refresh').addEventListener('click',refresh);void refresh();return {refresh};
 }
 export async function mountVoicePanel(element,{api,esc,toast,chats,compact=false,purpose='all'}){
-  element.innerHTML=`<fieldset class="extension-fieldset voice-studio-panel"><legend>声音与歌曲</legend><p><a class="button" href="#music">打开音乐工作台 · 网易云登录与搜索</a></p><p class="subtle">在聊天里说“唱《小星星》”，即可自动寻找音源、分离伴奏并用肥鱼音色演唱。指定歌手可避免选错版本；每段最多55秒，新曲首次需要制作；语音频率单独计算，制作和发送分别排队；成品自动保存，下次同曲同音色直接复用。聊天里问“唱歌进度”可查看当前阶段。</p><p data-v-status aria-live="polite">正在检查本机引擎…</p><button type="button" class="button" data-v-refresh>刷新状态</button><hr><label class="field">歌曲名称<input data-v-title placeholder="例如：小鱼慢慢游"></label><label class="field">导入清唱人声（最长60秒）<input type="file" accept="audio/*" data-v-file><small>保存在本机，之后可按名称点播。含伴奏的录音需先分离人声。</small></label><button type="button" class="button" data-v-import>加入曲库</button><section aria-label="本机音乐曲库"><h3>已加载的音乐 <span data-v-count></span></h3><p class="subtle">已保存成品和导入的人声会自动加入，每5秒更新。成品可直接复用，人声素材需要制作。</p><label class="field">查找音乐<input type="search" data-v-search placeholder="输入歌名或歌手"></label><div data-v-songs aria-live="polite"></div></section><hr><label class="field">测试接收聊天<select data-v-chat>${chats.map(chat=>`<option value="${esc(chat.key)}">${esc(chat.name)}</option>`).join('')}</select></label><label class="field">测试音色<select data-v-style><option value="cute">明亮可爱（B）</option><option value="natural">自然可爱（A）</option><option value="gentle">温柔</option></select></label><label class="field">测试文字<textarea data-v-text maxlength="220">你好呀，我是大肥鱼。现在我们可以用语音聊天啦。</textarea></label><button type="button" class="button" data-v-test ${chats.length?'':'disabled'}>发送一条测试语音</button><small>先保存插件权限和聊天范围；此按钮会向选中的微信聊天发消息。</small></fieldset><section class="card production-progress" aria-label="制作与发送进度"><h2>${purpose==='music'?'音乐制作与发送进度':'语音制作与发送进度'}</h2><p class="subtle" data-v-original>原创点唱：在已授权聊天里说「写一首关于下雨天的歌，编个舒缓的伴奏唱给我」。需要本机按谱演唱就绪；不会搜索已有歌曲。</p><div data-v-jobs aria-live="polite"></div></section><fieldset class="extension-fieldset"><p class="inline-error" data-v-error role="alert"></p></fieldset>`;
+  element.innerHTML=`<fieldset class="extension-fieldset voice-studio-panel"><legend>声音与歌曲</legend><p><a class="button" href="#music">打开音乐工作台 · 登录与跨平台搜歌</a></p><p class="subtle">在聊天里说“唱《小星星》”，即可自动寻找音源、分离伴奏并用肥鱼音色演唱。指定歌手可避免选错版本；每段最多55秒，新曲首次需要制作；语音频率单独计算，制作和发送分别排队；成品自动保存，下次同曲同音色直接复用。聊天里问“唱歌进度”可查看当前阶段。</p><p data-v-status aria-live="polite">正在检查本机引擎…</p><button type="button" class="button" data-v-refresh>刷新状态</button><hr><label class="field">歌曲名称<input data-v-title placeholder="例如：小鱼慢慢游"></label><label class="field">导入清唱人声（最长60秒）<input type="file" accept="audio/*" data-v-file><small>保存在本机，之后可按名称点播。含伴奏的录音需先分离人声。</small></label><button type="button" class="button" data-v-import>加入曲库</button><section aria-label="本机音乐曲库"><h3>已加载的音乐 <span data-v-count></span></h3><p class="subtle">已保存成品和导入的人声会自动加入，每5秒更新。成品可直接复用，人声素材需要制作。</p><label class="field">查找音乐<input type="search" data-v-search placeholder="输入歌名或歌手"></label><div data-v-songs aria-live="polite"></div></section><hr><label class="field">测试接收聊天<select data-v-chat>${chats.map(chat=>`<option value="${esc(chat.key)}">${esc(chat.name)}</option>`).join('')}</select></label><label class="field">测试音色<select data-v-style><option value="cute">明亮可爱（B）</option><option value="natural">自然可爱（A）</option><option value="gentle">温柔</option></select></label><label class="field">测试文字<textarea data-v-text maxlength="220">你好呀，我是大肥鱼。现在我们可以用语音聊天啦。</textarea></label><button type="button" class="button" data-v-test ${chats.length?'':'disabled'}>发送一条测试语音</button><small>先保存插件权限和聊天范围；此按钮会向选中的微信聊天发消息。</small></fieldset><section class="card production-progress" aria-label="制作与发送进度"><h2>${purpose==='music'?'音乐制作与发送进度':'语音制作与发送进度'}</h2><p class="subtle" data-v-original>原创点唱：在已授权聊天里说「写一首关于下雨天的歌，编个舒缓的伴奏唱给我」。需要本机按谱演唱就绪；不会搜索已有歌曲。</p><div data-v-jobs aria-live="polite"></div></section><fieldset class="extension-fieldset"><p class="inline-error" data-v-error role="alert"></p></fieldset>`;
   if(purpose==='voice')element.querySelector('[data-v-original]').hidden=true;
   if(purpose!=='all'){const importFields=['title','file','import'];for(const key of importFields){const el=element.querySelector('[data-v-'+key+']');const node=el?.closest('label')??el;if(node)node.hidden=purpose==='voice';}for(const key of ['chat','style','text','test']){const el=element.querySelector('[data-v-'+key+']');const node=el?.closest('label')??el;if(node)node.hidden=purpose==='music';}const testNote=element.querySelector('[data-v-test]')?.nextElementSibling;if(testNote)testNote.hidden=purpose==='music';const intro=element.querySelector('.voice-studio-panel>p.subtle');if(intro)intro.hidden=true;element.querySelector('legend').textContent=purpose==='music'?'人声素材与音乐进度':'语音测试与发送进度';}
   if(compact){element.querySelector('.voice-studio-panel>p')?.setAttribute('hidden','');element.querySelector('section[aria-label="本机音乐曲库"]')?.setAttribute('hidden','');}
@@ -114,7 +219,7 @@ export async function mountVoicePanel(element,{api,esc,toast,chats,compact=false
     VOICE_SUBMISSION_UNCERTAIN:"微信可能已接收提交，请到目标聊天确认后再决定是否重发",
     VOICE_NATIVE_REJECTED:"微信拒绝语音投递，请在连接诊断检查匹配微信和发送组件",
     VOICE_ACCESS_CHANGED:"微信账号或聊天权限已变化，请核对插件与聊天授权",
-    SONG_SEPARATOR_MEMORY_PRESSURE:'人声分离时本机内存不足，请关闭暂不用的模型或程序后重新点歌',SONG_SEPARATOR_FAILED:'人声与伴奏分离失败，请检查组件或重新制作',SONG_CONVERSION_ALIGNMENT_FAILED:'分段换声长度异常，已停止制作以避免歌词与伴奏错位',SINGING_API_HTTP_413:'换声服务拒绝了过大的音频，请更新后重新制作歌曲',VOICE_API_SETTINGS_CHANGED:'语音API配置已变化，请重新创建语音任务',VOICE_API_CREDENTIAL_UNAVAILABLE:'API密钥无法解密，请重新保存密钥',VOICE_API_HTTP_401:'API密钥验证失败',VOICE_API_HTTP_403:'API拒绝访问，请检查模型权限',VOICE_API_HTTP_429:'API限流或额度不足',VOICE_API_WAV_REQUIRED:'API没有返回WAV音频',SONG_LOGIN_REQUIRED:'这首歌需要先在音乐页面登录网易云',SONG_TRIAL_ONLY:'网易云仅返回试听片段，暂不能翻唱',SONG_ACCOUNT_AUDIO_UNAVAILABLE:'网易云未提供完整音源，请检查账号权限或选择其他版本',SONG_SEARCH_UNAVAILABLE:"暂未取得搜索结果，可以直接发网易云歌曲链接",SAVED_SONG_UNAVAILABLE: "该成品不可用或音色已变化，请重新制作",SAVED_SONG_CORRUPT:"已保存音频校验失败，请重新制作",VOICE_SONG_LINK_INVALID:'请提供网易云歌曲链接，歌单请先选定一首',SONG_EXACT_MATCH_NOT_FOUND:'未找到准确匹配的歌曲，可补充歌手名称',SONG_PUBLIC_AUDIO_UNAVAILABLE:'该歌曲暂无公开可播放音源',VOICE_NATIVE_VERSION_UNSUPPORTED:'微信 4.1.15.13 的原生语音组件未就绪',VOICE_NATIVE_SENDER_NOT_READY:'微信原生语音组件尚未就绪',VOICE_RECEIPT_UNCONFIRMED:'尚未核验送达，不会自动重发'};
+    SONG_SEPARATOR_MEMORY_PRESSURE:'人声分离时本机内存不足，请关闭暂不用的模型或程序后重新点歌',SONG_SEPARATOR_FAILED:'人声与伴奏分离失败，请检查组件或重新制作',SONG_CONVERSION_ALIGNMENT_FAILED:'分段换声长度异常，已停止制作以避免歌词与伴奏错位',SINGING_API_HTTP_413:'换声服务拒绝了过大的音频，请更新后重新制作歌曲',VOICE_API_SETTINGS_CHANGED:'语音API配置已变化，请重新创建语音任务',VOICE_API_CREDENTIAL_UNAVAILABLE:'API密钥无法解密，请重新保存密钥',VOICE_API_HTTP_401:'API密钥验证失败',VOICE_API_HTTP_403:'API拒绝访问，请检查模型权限',VOICE_API_HTTP_429:'API限流或额度不足',VOICE_API_WAV_REQUIRED:'API没有返回WAV音频',SONG_LOGIN_REQUIRED:'这首歌需要先在音乐页面登录网易云',SONG_PLATFORM_LOGIN_REQUIRED:'可在音乐页登录对应平台，再检查是否能读取完整音源',SONG_PLATFORM_AUDIO_UNAVAILABLE:'该平台暂无可用的完整音源，可换一个平台或版本',SONG_SOURCE_INCOMPLETE:'下载的音源长度或文件大小与平台资料不符，请重试或换一个版本',SONG_TRIAL_ONLY:'平台仅返回试听片段，暂不能翻唱',SONG_ACCOUNT_AUDIO_UNAVAILABLE:'平台未提供完整音源，请核对登录与账号权限，或选择其他版本',SONG_SEARCH_UNAVAILABLE:"暂未取得搜索结果，可补充歌手或直接发官方歌曲链接",SAVED_SONG_UNAVAILABLE: "该成品不可用或音色已变化，请重新制作",SAVED_SONG_CORRUPT:"已保存音频校验失败，请重新制作",VOICE_SONG_LINK_INVALID:'请提供网易云、QQ 音乐或酷狗支持的歌曲链接，歌单请先选定一首',SONG_EXACT_MATCH_NOT_FOUND:'未找到准确匹配的歌曲，可补充歌手名称',SONG_PUBLIC_AUDIO_UNAVAILABLE:'该歌曲暂无公开可播放音源',VOICE_NATIVE_VERSION_UNSUPPORTED:'微信 4.1.15.13 的原生语音组件未就绪',VOICE_NATIVE_SENDER_NOT_READY:'微信原生语音组件尚未就绪',VOICE_RECEIPT_UNCONFIRMED:'尚未核验送达，不会自动重发'};
   function watch(status){clearTimeout(timer);if(element.isConnected)timer=setTimeout(()=>{if(element.isConnected)void refresh();},status?.jobs?.some(job=>['queued','generating','prepared','submitting','submitted'].includes(job.state))?2500:5000);}
   const find=name=>element.querySelector('[data-v-'+name+']'),error=message=>{if(element.isConnected)find('error').textContent=message;};
   function renderSongs(){

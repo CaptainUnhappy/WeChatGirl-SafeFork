@@ -44,3 +44,7 @@ Windows 图形安装链路参考 [sourcepro5/WeChatAgent](https://github.com/sou
 Weather forecasts are fetched from [Open-Meteo](https://open-meteo.com/) and locations from its GeoNames-backed geocoding API. Data is provided under [CC BY 4.0](https://open-meteo.com/en/licence); source attribution is retained in the model evidence and links. The default public API is for personal/non-commercial use and subject to [Open-Meteo terms and request limits](https://open-meteo.com/en/terms). Commercial use requires a suitable provider subscription or a separately operated service. No provider source code is bundled.
 
 网页正文提取使用 [htmlparser2 10.0.0](https://github.com/fb55/htmlparser2/tree/v10.0.0)（MIT）；锁文件固定依赖，安装包保留 htmlparser2、entities、domhandler、domutils 等各自的 LICENSE。网页工具的网络地址校验复用 MIT Bridge 的 safe-fetch 逻辑，来源许可见 `components/qq-bridge/LICENSE`。仅使用本机 DNS 解析；代理返回 Fake-IP 时按非公开地址拒绝，不向额外 DNS 服务发送网页域名。
+
+### QQ 音乐与酷狗音乐登录参考
+
+QQ 音乐的官方窗口登录与播放请求参考 [Simple Music](https://github.com/Yyyangshenghao/simple-music/blob/master/docs/qq-music-api.md)。酷狗账号与音源权限行为参考 [KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi/blob/main/docs/README.md)，实际接入使用 [酷狗官网播放器](https://www.kugou.com/song/) 的网页请求。项目未打包或运行上述开源项目的代码。

@@ -43,7 +43,7 @@
   },
   "breeze": {
     "name": "Breeze 本地语音合成权重",
-    "source": "HF 镜像（镜像 CDN 线路因地区而异）",
+    "source": "HF 镜像优先，失败后尝试 Hugging Face 官方源",
     "directory": "state/voice/breeze/models",
     "license": "https://github.com/breezeblue-ai/breeze-tts#license",
     "files": [
@@ -52,7 +52,8 @@
         "bytes": 3568844480,
         "sha256": "a02bcc4b69b0601032727f8040c4942149b1b73aa0f69022fe5aaa6a8f0ef879",
         "urls": [
-          "https://hf-mirror.com/HoppouAI/Breeze-TTS-2.cpp/resolve/main/breeze-tts-2-q8_0.gguf"
+          "https://hf-mirror.com/HoppouAI/Breeze-TTS-2.cpp/resolve/main/breeze-tts-2-q8_0.gguf",
+          "https://huggingface.co/HoppouAI/Breeze-TTS-2.cpp/resolve/main/breeze-tts-2-q8_0.gguf"
         ]
       }
     ]
